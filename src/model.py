@@ -15,15 +15,22 @@ class MeanPoolMLP(nn.Module):
         # Example:
         # self.fc1 = nn.Linear(in_features, hidden_dim)
         # self.fc2 = nn.Linear(hidden_dim, 1)
-        pass
+        self.feature_extractor = nn.Sequential(
+            nn.Linear(in_features, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1),
+        )
 
     def forward(self, x):
         # TODO: mean pool over time dimension -> (B, features)
-        # pooled = x.mean(dim=1)
+        pooled = x.mean(dim=1)
         # TODO: feed pooled features through your MLP
-        # logits = ...
-        # return logits
-        raise NotImplementedError
+        logits = self.feature_extractor(pooled)
+        return logits
 
 
 class CNN1D(nn.Module):
@@ -93,3 +100,10 @@ def build_model(name: str, **kwargs):
     if name == "cnn2d":
         return CNN2D(**kwargs)
     raise ValueError(f"Unknown model name: {name}")
+
+
+if __name__ == "__main__":
+    model = MeanPoolMLP()
+    x = torch.randn(4, 180, 321)
+    logits = model(x)
+    print(logits.shape)  # should be torch.Size([4, 1])
