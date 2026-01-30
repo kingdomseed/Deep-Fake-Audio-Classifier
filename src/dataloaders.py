@@ -39,13 +39,13 @@ def create_dataloaders(train_features_path, train_labels_path,
     #                           num_workers=..., pin_memory=...)
     # dev_loader = DataLoader(...)
     # test_loader = DataLoader(...)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, 
+    train_loader = DataLoader(train_dataset, batch_size=batch_size,
                               shuffle=True,
                               num_workers=num_workers, pin_memory=True)
-    dev_loader = DataLoader(dev_dataset, batch_size=batch_size, 
+    dev_loader = DataLoader(dev_dataset, batch_size=batch_size,
                             shuffle=False,
                             num_workers=num_workers, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, 
+    test_loader = DataLoader(test_dataset, batch_size=batch_size,
                              shuffle=False,
                              num_workers=num_workers, pin_memory=True)
 
@@ -57,3 +57,24 @@ def make_loader(features_path, labels_path, batch_size=32,
     dataset = ds.AudioDeepfakeDataset(features_path, labels_path)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
                       num_workers=num_workers)
+
+
+if __name__ == "__main__":
+    # Quick sanity check: confirm feature shapes are fixed-size in the dataset.
+    train_features_path = "data/train/features.pkl"
+    train_labels_path = "data/train/labels.pkl"
+
+    dataset = ds.AudioDeepfakeDataset(train_features_path, train_labels_path)
+    sample_count = min(10, len(dataset))
+    sample_shapes = {dataset[i][0].shape for i in range(sample_count)}
+    print(f"Sample shapes (first {sample_count}): {sample_shapes}")
+
+    if len(sample_shapes) == 1:
+        print("Features are fixed-size (default collate is OK).")
+    else:
+        print("Features are variable-length (consider a custom collate_fn).")
+
+    loader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=0)
+    batch_features, batch_labels = next(iter(loader))
+    print(f"Batch features shape: {batch_features.shape}")
+    print(f"Batch labels shape: {batch_labels.shape}")
