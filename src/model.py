@@ -35,29 +35,33 @@ class MeanPoolMLP(nn.Module):
 
 class CNN1D(nn.Module):
     """
-    1D CNN over time. Treat features as channels.
+    Safe 1D CNN baseline over time.
     Input x: (B, T, F) -> transpose to (B, F, T)
     """
 
-    def __init__(self, in_channels=321, num_classes=1):
+    def __init__(self, in_channels=321, num_classes=1, dropout=0.2):
         super().__init__()
-        # TODO: define 1D conv blocks here (Conv1d/BatchNorm/ReLU/Dropout)
-        # self.conv = nn.Sequential(...)
-        # TODO: define classifier head
-        # self.classifier = nn.Linear(...)
-        pass
+        self.conv = nn.Sequential(
+            nn.Conv1d(in_channels, 128, kernel_size=3, padding=1),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(128, 128, kernel_size=3, padding=1),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+        )
+        self.classifier = nn.Linear(256, num_classes)
 
     def forward(self, x):
-        # TODO: transpose to (B, F, T)
-        # x = x.transpose(1, 2)
-        # TODO: apply conv blocks
-        # x = self.conv(x)
-        # TODO: global pooling over time (e.g., mean or max)
-        # x = x.mean(dim=-1)
-        # TODO: classifier to logits
-        # logits = self.classifier(x)
-        # return logits
-        raise NotImplementedError
+        x = x.transpose(1, 2)
+        x = self.conv(x)
+        x = x.mean(dim=-1)
+        logits = self.classifier(x)
+        return logits
 
 
 class CNN2D(nn.Module):
