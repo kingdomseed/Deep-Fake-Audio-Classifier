@@ -1,5 +1,10 @@
+import argparse
 import numpy as np
 import torch
+import torch.nn as nn
+
+from dataloaders import make_loader
+from model import build_model
 
 
 def calculate_eer(scores, labels):
@@ -58,26 +63,18 @@ def evaluate(model, dataloader, criterion=None, device="cpu"):
 
     with torch.no_grad():
         for features, batch_labels in dataloader:
-            # TODO: move to device
-            # features = features.to(device)
-            # batch_labels = batch_labels.to(device)
+            features = features.to(device)
+            batch_labels = batch_labels.to(device)
 
-            # TODO: forward pass (logits shape: [B, 1] or [B])
-            # logits = model(features)
+            logits = model(features).squeeze(-1)
 
-            # TODO: align shapes for loss
-            # logits = logits.squeeze(-1)
+            if criterion is not None:
+                loss = criterion(logits, batch_labels)
+                total_loss += loss.item() * batch_labels.size(0)
+                total_count += batch_labels.size(0)
 
-            # TODO: compute loss if criterion is provided
-            # if criterion is not None:
-            #     loss = criterion(logits, batch_labels)
-            #     total_loss += loss.item() * batch_labels.size(0)
-            #     total_count += batch_labels.size(0)
-
-            # TODO: collect scores/labels for EER
-            # scores.extend(logits.detach().cpu().tolist())
-            # labels.extend(batch_labels.detach().cpu().tolist())
-            pass
+            scores.extend(logits.detach().cpu().tolist())
+            labels.extend(batch_labels.detach().cpu().tolist())
 
     avg_loss = (total_loss / total_count) if total_count > 0 else None
     eer, threshold = (None, None)
@@ -93,9 +90,56 @@ def evaluate(model, dataloader, criterion=None, device="cpu"):
 
 
 if __name__ == "__main__":
-    # TODO: add a quick check here if you want to run evaluation directly.
-    # Example:
-    # - load a saved model checkpoint
-    # - build a dev dataloader
-    # - call evaluate(...)
-    pass
+    parser = argparse.ArgumentParser(description="Evaluate a model checkpoint on a labeled dataset.")
+    parser.add_argument("--features", required=True, help="Path to features.pkl")
+    parser.add_argument("--labels", required=True, help="Path to labels.pkl")
+    parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
+    parser.add_argument("--model", default="mlp", choices=["mlp", "cnn1d", "cnn2d"])
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--device", default=None, help="cuda, mps, or cpu")
+    parser.add_argument("--in-features", type=int, default=321)
+    parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    args = parser.parse_args()
+
+    if args.device is None:
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+    else:
+        device = args.device
+
+    model_kwargs = {}
+    if args.model == "mlp":
+        model_kwargs = {
+            "in_features": args.in_features,
+            "hidden_dim": args.hidden_dim,
+            "dropout": args.dropout,
+        }
+
+    model = build_model(args.model, **model_kwargs).to(device)
+
+    ckpt = torch.load(args.checkpoint, map_location=device)
+    if isinstance(ckpt, dict) and "model_state" in ckpt:
+        model.load_state_dict(ckpt["model_state"])
+    else:
+        model.load_state_dict(ckpt)
+
+    dataloader = make_loader(
+        args.features,
+        args.labels,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=False,
+    )
+
+    criterion = nn.BCEWithLogitsLoss()
+    metrics, _, _ = evaluate(model, dataloader, criterion=criterion, device=device)
+
+    print(f"avg_loss={metrics['avg_loss']}")
+    print(f"eer={metrics['eer']}")
+    print(f"threshold={metrics['threshold']}")
