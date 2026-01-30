@@ -124,6 +124,13 @@ def train_with_rich(model, train_loader, dev_loader, criterion, optimizer, devic
 
     console = Console()
 
+    # Display training configuration
+    console.print(f"[bold cyan]Training Configuration[/bold cyan]")
+    console.print(f"Device: [yellow]{device}[/yellow]")
+    console.print(f"Model: [yellow]{args.model}[/yellow]")
+    console.print(f"Epochs: [yellow]{args.epochs}[/yellow]")
+    console.print()
+
     best_eer = None
     prev_eer = None
     patience = args.early_stop
@@ -180,13 +187,41 @@ def train_with_rich(model, train_loader, dev_loader, criterion, optimizer, devic
             else:
                 status_text.append("-", style="dim")
 
-            # Create info panel
+            # Create info panel with colored arrows
             info_table = Table.grid(padding=(0, 2))
             info_table.add_column(style="cyan", justify="right")
             info_table.add_column(style="magenta")
-            info_table.add_row("Train Loss:", f"{train_loss:.4f}")
-            info_table.add_row("Dev Loss:", f"{dev_metrics['avg_loss']:.4f}")
-            info_table.add_row("Dev EER:", f"{dev_metrics['eer']:.4f}")
+
+            # Train Loss with arrow
+            train_loss_text = Text(f"{train_loss:.4f}")
+            if len(history) > 0:
+                prev_train_loss = history[-1]["train_loss"]
+                if train_loss < prev_train_loss:
+                    train_loss_text.append(" ↓", style="green")
+                elif train_loss > prev_train_loss:
+                    train_loss_text.append(" ↑", style="red")
+            info_table.add_row("Train Loss:", train_loss_text)
+
+            # Dev Loss with arrow
+            dev_loss_text = Text(f"{dev_metrics['avg_loss']:.4f}")
+            if len(history) > 0:
+                prev_dev_loss = history[-1]["dev_loss"]
+                if dev_metrics['avg_loss'] < prev_dev_loss:
+                    dev_loss_text.append(" ↓", style="green")
+                elif dev_metrics['avg_loss'] > prev_dev_loss:
+                    dev_loss_text.append(" ↑", style="red")
+            info_table.add_row("Dev Loss:", dev_loss_text)
+
+            # Dev EER with arrow
+            dev_eer_text = Text(f"{dev_metrics['eer']:.4f}")
+            if len(history) > 0:
+                prev_dev_eer = history[-1]["dev_eer"]
+                if dev_metrics['eer'] < prev_dev_eer:
+                    dev_eer_text.append(" ↓", style="green")
+                elif dev_metrics['eer'] > prev_dev_eer:
+                    dev_eer_text.append(" ↑", style="red")
+            info_table.add_row("Dev EER:", dev_eer_text)
+
             info_table.add_row("Status:", status_text)
             if best_eer is not None:
                 info_table.add_row("Best EER:", f"{best_eer:.4f}")
@@ -271,13 +306,42 @@ def train_with_rich(model, train_loader, dev_loader, criterion, optimizer, devic
     summary_table.add_column("Dev EER", justify="right")
     summary_table.add_column("Status")
 
-    for h in history:
-        status = "[green]✓ BEST[/green]" if h["is_best"] else ""
+    # Find the epoch with the absolute best EER
+    best_epoch_idx = min(range(len(history)), key=lambda i: history[i]["dev_eer"])
+
+    for i, h in enumerate(history):
+        # Add colored arrows for train loss
+        train_loss_str = f"{h['train_loss']:.4f}"
+        if i > 0:
+            if h['train_loss'] < history[i-1]['train_loss']:
+                train_loss_str += " [green]↓[/green]"
+            elif h['train_loss'] > history[i-1]['train_loss']:
+                train_loss_str += " [red]↑[/red]"
+
+        # Add colored arrows for dev loss
+        dev_loss_str = f"{h['dev_loss']:.4f}"
+        if i > 0:
+            if h['dev_loss'] < history[i-1]['dev_loss']:
+                dev_loss_str += " [green]↓[/green]"
+            elif h['dev_loss'] > history[i-1]['dev_loss']:
+                dev_loss_str += " [red]↑[/red]"
+
+        # Add colored arrows for dev EER
+        dev_eer_str = f"{h['dev_eer']:.4f}"
+        if i > 0:
+            if h['dev_eer'] < history[i-1]['dev_eer']:
+                dev_eer_str += " [green]↓[/green]"
+            elif h['dev_eer'] > history[i-1]['dev_eer']:
+                dev_eer_str += " [red]↑[/red]"
+
+        # Only mark the absolute best epoch
+        status = "[green]✓ BEST[/green]" if i == best_epoch_idx else ""
+
         summary_table.add_row(
             str(h["epoch"]),
-            f"{h['train_loss']:.4f}",
-            f"{h['dev_loss']:.4f}",
-            f"{h['dev_eer']:.4f}",
+            train_loss_str,
+            dev_loss_str,
+            dev_eer_str,
             status
         )
 
@@ -361,16 +425,25 @@ def main():
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    # Use Rich visualization if requested, otherwise use tqdm
-    if args.rich:
+    # Use Rich visualization by default, fall back to tqdm if disabled or unavailable
+    use_rich = not args.no_rich
+
+    if use_rich:
         rich_success = train_with_rich(
             model, train_loader, dev_loader, criterion, optimizer, device, args, best_path, last_path
         )
         if not rich_success:
-            # Fall back to tqdm if Rich fails
-            args.rich = False
+            # Fall back to tqdm if Rich fails to import
+            use_rich = False
 
-    if not args.rich:
+    if not use_rich:
+        # Display training configuration
+        print("Training Configuration")
+        print(f"Device: {device}")
+        print(f"Model: {args.model}")
+        print(f"Epochs: {args.epochs}")
+        print()
+
         # Standard tqdm training loop
         best_eer = None
         prev_eer = None
