@@ -14,15 +14,21 @@ def build_config_dict(args) -> Dict[str, Any]:
     Returns:
         Dictionary containing training configuration
     """
+    model_name = getattr(args, "model", None)
+    if model_name is None:
+        model_name = getattr(args, "model_name", None)
+
     return {
-        "model_name": args.model,
-        "batch_size": args.batch_size,
-        "num_workers": args.num_workers,
-        "lr": args.lr,
-        "weight_decay": args.weight_decay,
-        "in_features": args.in_features,
-        "hidden_dim": args.hidden_dim,
-        "dropout": args.dropout,
+        "model_name": model_name,
+        "batch_size": getattr(args, "batch_size", None),
+        "num_workers": getattr(args, "num_workers", None),
+        "lr": getattr(args, "lr", None),
+        "weight_decay": getattr(args, "weight_decay", None),
+        "in_features": getattr(args, "in_features", None),
+        "hidden_dim": getattr(args, "hidden_dim", None),
+        "dropout": getattr(args, "dropout", None),
+        "dropout_mlp": getattr(args, "dropout_mlp", None),
+        "dropout_cnn": getattr(args, "dropout_cnn", None),
         "pool_bins": getattr(args, "pool_bins", None),
     }
 

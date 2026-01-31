@@ -29,11 +29,18 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.0)
-    parser.add_argument("--early-stop", type=int, default=0)
+    parser.add_argument("--early-stop", type=int, default=3)
     parser.add_argument("--device", default=None)
     parser.add_argument("--in-features", type=int, default=321)
     parser.add_argument("--hidden-dim", type=int, default=128)
-    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.2,
+        help="Base dropout. If --dropout-mlp or --dropout-cnn are set, those take priority.",
+    )
+    parser.add_argument("--dropout-mlp", type=float, default=None)
+    parser.add_argument("--dropout-cnn", type=float, default=None)
     parser.add_argument("--pool-bins", type=int, default=1)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--results-dir", default="results")
@@ -72,21 +79,24 @@ def set_seed(seed: int) -> None:
 
 def build_model_kwargs(model_name: str, args) -> Dict:
     if model_name in {"mlp", "stats_mlp"}:
+        dropout = args.dropout_mlp if args.dropout_mlp is not None else args.dropout
         return {
             "in_features": args.in_features,
             "hidden_dim": args.hidden_dim,
-            "dropout": args.dropout,
+            "dropout": dropout,
         }
     if model_name in {"cnn1d", "cnn1d_spatial"}:
+        dropout = args.dropout_cnn if args.dropout_cnn is not None else args.dropout
         return {
             "in_channels": args.in_features,
-            "dropout": args.dropout,
+            "dropout": dropout,
             "pool_bins": args.pool_bins,
         }
     if model_name in {"cnn2d", "cnn2d_spatial"}:
+        dropout = args.dropout_cnn if args.dropout_cnn is not None else args.dropout
         return {
             "in_features": args.in_features,
-            "dropout": args.dropout,
+            "dropout": dropout,
         }
     return {}
 
