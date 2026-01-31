@@ -594,6 +594,10 @@ def main():
         save_model_curves_plot(model_name, stats, curve_path)
         plot_paths[model_name] = curve_path
 
+    combined_plot_path = os.path.join(args.results_dir, "plots", "combined_losses.png")
+    save_combined_loss_plot(per_model_stats, combined_plot_path)
+    plot_paths["combined"] = combined_plot_path
+
     report_path = os.path.join(args.results_dir, "benchmark_report.md")
     write_report(report_path, summary_results, per_model_stats, overfit_epochs, plot_paths, args)
 

@@ -2,6 +2,7 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
+import pandas as pd
 
 from dataloaders import make_loader
 from model import build_model
@@ -46,7 +47,7 @@ def calculate_eer(scores, labels):
     return float(eer), float(threshold)
 
 
-def evaluate(model, dataloader, criterion=None, device="cpu"):
+def evaluate(model, dataloader, criterion=None, device="cpu", apply_sigmoid=False):
     """
     Run model on a labeled dataloader and return metrics and raw outputs.
 
@@ -73,7 +74,10 @@ def evaluate(model, dataloader, criterion=None, device="cpu"):
                 total_loss += loss.item() * batch_labels.size(0)
                 total_count += batch_labels.size(0)
 
-            scores.extend(logits.detach().cpu().tolist())
+            if apply_sigmoid:
+                scores.extend(torch.sigmoid(logits).detach().cpu().tolist())
+            else:
+                scores.extend(logits.detach().cpu().tolist())
             labels.extend(batch_labels.detach().cpu().tolist())
 
     avg_loss = (total_loss / total_count) if total_count > 0 else None
@@ -87,6 +91,26 @@ def evaluate(model, dataloader, criterion=None, device="cpu"):
         "threshold": threshold,
     }
     return metrics, scores, labels
+
+
+def verify_uttid_alignment(features_path: str, labels_path: str) -> None:
+    features_df = pd.read_pickle(features_path)
+    labels_df = pd.read_pickle(labels_path)
+
+    if "uttid" not in features_df.columns:
+        raise ValueError("features.pkl must contain 'uttid'")
+    if "uttid" not in labels_df.columns:
+        raise ValueError("labels.pkl must contain 'uttid'")
+
+    merged = pd.merge(
+        features_df[["uttid"]],
+        labels_df[["uttid"]],
+        on="uttid",
+        how="inner",
+    )
+
+    if len(merged) != len(features_df) or len(merged) != len(labels_df):
+        raise ValueError("uttid mismatch between features and labels")
 
 
 if __name__ == "__main__":
@@ -106,6 +130,10 @@ if __name__ == "__main__":
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--pool-bins", type=int, default=1)
+    parser.add_argument("--check-uttid", action="store_true", default=True)
+    parser.add_argument("--no-check-uttid", action="store_true", default=False)
+    parser.add_argument("--apply-sigmoid", action="store_true", default=True)
+    parser.add_argument("--no-apply-sigmoid", action="store_true", default=False)
     args = parser.parse_args()
 
     if args.device is None:
@@ -136,6 +164,19 @@ if __name__ == "__main__":
             "dropout": args.dropout,
         }
 
+    if args.no_check_uttid:
+        check_uttid = False
+    else:
+        check_uttid = args.check_uttid
+
+    if check_uttid:
+        verify_uttid_alignment(args.features, args.labels)
+
+    if args.no_apply_sigmoid:
+        apply_sigmoid = False
+    else:
+        apply_sigmoid = args.apply_sigmoid
+
     model = build_model(args.model, **model_kwargs).to(device)
 
     ckpt = torch.load(args.checkpoint, map_location=device)
@@ -153,7 +194,13 @@ if __name__ == "__main__":
     )
 
     criterion = nn.BCEWithLogitsLoss()
-    metrics, _, _ = evaluate(model, dataloader, criterion=criterion, device=device)
+    metrics, _, _ = evaluate(
+        model,
+        dataloader,
+        criterion=criterion,
+        device=device,
+        apply_sigmoid=apply_sigmoid,
+    )
 
     print(f"avg_loss={metrics['avg_loss']}")
     print(f"eer={metrics['eer']}")
