@@ -80,7 +80,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="mlp",
-        choices=["mlp", "stats_mlp", "cnn1d", "cnn1d_spatial", "cnn2d", "cnn2d_spatial"],
+        choices=["cnn1d", "cnn2d", "cnn2d_spatial", "crnn", "crnn2"],
     )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
@@ -143,19 +143,18 @@ def main():
 
     # Model
     model_kwargs = {}
-    if args.model in {"mlp", "stats_mlp"}:
-        model_kwargs = {
-            "in_features": args.in_features,
-            "hidden_dim": args.hidden_dim,
-            "dropout": args.dropout,
-        }
-    elif args.model in {"cnn1d", "cnn1d_spatial"}:
+    if args.model in {"cnn1d"}:
         model_kwargs = {
             "in_channels": args.in_features,
             "dropout": args.dropout,
             "pool_bins": args.pool_bins,
         }
     elif args.model in {"cnn2d", "cnn2d_spatial"}:
+        model_kwargs = {
+            "in_features": args.in_features,
+            "dropout": args.dropout,
+        }
+    elif args.model in {"crnn", "crnn2"}:
         model_kwargs = {
             "in_features": args.in_features,
             "dropout": args.dropout,

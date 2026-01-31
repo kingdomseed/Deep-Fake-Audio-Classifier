@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument("--train-labels", default="data/train/labels.pkl")
     parser.add_argument("--dev-features", default="data/dev/features.pkl")
     parser.add_argument("--dev-labels", default="data/dev/labels.pkl")
-    parser.add_argument("--models", default="mlp,stats_mlp,cnn1d,cnn2d")
+    parser.add_argument("--models", default="cnn1d,cnn2d,cnn2d_spatial,crnn,crnn2")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--epochs", type=int, default=10)
@@ -37,10 +37,8 @@ def parse_args():
         "--dropout",
         type=float,
         default=0.2,
-        help="Base dropout. If --dropout-mlp or --dropout-cnn are set, those take priority.",
+        help="Dropout for CNN models.",
     )
-    parser.add_argument("--dropout-mlp", type=float, default=None)
-    parser.add_argument("--dropout-cnn", type=float, default=None)
     parser.add_argument("--pool-bins", type=int, default=1)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--results-dir", default="results")
@@ -78,22 +76,21 @@ def set_seed(seed: int) -> None:
 
 
 def build_model_kwargs(model_name: str, args) -> Dict:
-    if model_name in {"mlp", "stats_mlp"}:
-        dropout = args.dropout_mlp if args.dropout_mlp is not None else args.dropout
-        return {
-            "in_features": args.in_features,
-            "hidden_dim": args.hidden_dim,
-            "dropout": dropout,
-        }
-    if model_name in {"cnn1d", "cnn1d_spatial"}:
-        dropout = args.dropout_cnn if args.dropout_cnn is not None else args.dropout
+    if model_name in {"cnn1d"}:
+        dropout = args.dropout
         return {
             "in_channels": args.in_features,
             "dropout": dropout,
             "pool_bins": args.pool_bins,
         }
     if model_name in {"cnn2d", "cnn2d_spatial"}:
-        dropout = args.dropout_cnn if args.dropout_cnn is not None else args.dropout
+        dropout = args.dropout
+        return {
+            "in_features": args.in_features,
+            "dropout": dropout,
+        }
+    if model_name in {"crnn", "crnn2"}:
+        dropout = args.dropout
         return {
             "in_features": args.in_features,
             "dropout": dropout,
@@ -424,7 +421,7 @@ def write_report(
     lines.append(f"- Epochs: {args.epochs}")
     lines.append(f"- Batch size: {args.batch_size}")
     lines.append(f"- Learning rate: {args.lr}")
-    lines.append(f"- Dropout: {args.dropout}")
+    lines.append(f"- Dropout (CNNs): {args.dropout}")
     lines.append(f"- Pool bins (CNN1D): {args.pool_bins}")
     lines.append(f"- Seeds: {args.seeds}")
     lines.append("- Optimizer policy:")
@@ -453,7 +450,12 @@ def write_report(
             lines.append(f"- {model}: potential overfitting starts around epoch {epoch}")
     lines.append("")
     lines.append("## Plots")
+    if "combined" in plot_paths:
+        rel_path = plot_paths["combined"].replace(os.getcwd() + os.sep, "")
+        lines.append(f"- combined: `{rel_path}`")
     for model, plot_path in plot_paths.items():
+        if model == "combined":
+            continue
         rel_path = plot_path.replace(os.getcwd() + os.sep, "")
         lines.append(f"- {model}: `{rel_path}`")
     lines.append("")
@@ -464,6 +466,41 @@ def write_report(
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write("\n".join(lines))
+
+
+def save_combined_loss_plot(
+    per_model_stats: Dict[str, Dict[int, Dict[str, float]]],
+    path: str,
+) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        print("matplotlib not available; skipping combined plot generation.")
+        return
+
+    plt.figure(figsize=(10, 6))
+    for model_name, stats in per_model_stats.items():
+        epochs = sorted(stats.keys())
+        train_mean = [
+            stats[e]["train_loss_mean"] if stats[e]["train_loss_mean"] is not None else np.nan
+            for e in epochs
+        ]
+        dev_mean = [
+            stats[e]["dev_loss_mean"] if stats[e]["dev_loss_mean"] is not None else np.nan
+            for e in epochs
+        ]
+        plt.plot(epochs, train_mean, label=f"{model_name} train")
+        plt.plot(epochs, dev_mean, linestyle="--", label=f"{model_name} dev")
+
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Train vs Dev Loss (All Models)")
+    plt.legend(ncol=2, fontsize=8)
+    plt.tight_layout()
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    plt.savefig(path, dpi=200)
+    plt.close()
 
 
 def main():
