@@ -1,0 +1,598 @@
+import argparse
+import csv
+import os
+import random
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+from dataloaders import make_loader
+from evaluation import evaluate
+from model import build_model
+from training import save_checkpoint
+from visualizers import BatchMetrics, EpochMetrics, TrainingConfig, create_visualizer
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run multiple model trainings and rank by best dev EER."
+    )
+    parser.add_argument("--train-features", default="data/train/features.pkl")
+    parser.add_argument("--train-labels", default="data/train/labels.pkl")
+    parser.add_argument("--dev-features", default="data/dev/features.pkl")
+    parser.add_argument("--dev-labels", default="data/dev/labels.pkl")
+    parser.add_argument("--models", default="mlp,stats_mlp,cnn1d,cnn2d")
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=0.0)
+    parser.add_argument("--early-stop", type=int, default=0)
+    parser.add_argument("--device", default=None)
+    parser.add_argument("--in-features", type=int, default=321)
+    parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--pool-bins", type=int, default=1)
+    parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument("--results-dir", default="results")
+    parser.add_argument("--seeds", default="0", help="comma-separated list of seeds")
+    parser.add_argument(
+        "--visualizer",
+        default="noop",
+        choices=["rich", "tqdm", "noop"],
+        help="training visualizer per model",
+    )
+    return parser.parse_args()
+
+
+def resolve_device(device_arg: Optional[str]) -> str:
+    if device_arg:
+        return device_arg
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def parse_seeds(seed_str: str) -> List[int]:
+    seeds = [s.strip() for s in seed_str.split(",") if s.strip()]
+    return [int(s) for s in seeds] if seeds else [0]
+
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def build_model_kwargs(model_name: str, args) -> Dict:
+    if model_name in {"mlp", "stats_mlp"}:
+        return {
+            "in_features": args.in_features,
+            "hidden_dim": args.hidden_dim,
+            "dropout": args.dropout,
+        }
+    if model_name in {"cnn1d", "cnn1d_spatial"}:
+        return {
+            "in_channels": args.in_features,
+            "dropout": args.dropout,
+            "pool_bins": args.pool_bins,
+        }
+    if model_name in {"cnn2d", "cnn2d_spatial"}:
+        return {
+            "in_features": args.in_features,
+            "dropout": args.dropout,
+        }
+    return {}
+
+
+def train_one_model(model_name: str, args, device: str, seed: int) -> Dict:
+    train_loader = make_loader(
+        args.train_features,
+        args.train_labels,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=True,
+    )
+    dev_loader = make_loader(
+        args.dev_features,
+        args.dev_labels,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        shuffle=False,
+    )
+
+    model_kwargs = build_model_kwargs(model_name, args)
+    model = build_model(model_name, **model_kwargs).to(device)
+
+    criterion = nn.BCEWithLogitsLoss()
+    use_adamw = model_name.startswith("cnn")
+    weight_decay = args.weight_decay
+    if use_adamw and weight_decay == 0.0:
+        weight_decay = 0.01
+    if weight_decay > 0:
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=args.lr, weight_decay=weight_decay
+        )
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    visualizer = create_visualizer(args.visualizer)
+    config = TrainingConfig(
+        device=device,
+        model=model_name,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.lr,
+        weight_decay=weight_decay,
+        early_stop_patience=args.early_stop,
+        in_features=args.in_features,
+        hidden_dim=args.hidden_dim,
+        dropout=args.dropout,
+    )
+    visualizer.on_training_start(config)
+
+    best_eer = None
+    best_metrics: Optional[EpochMetrics] = None
+    prev_metrics: Optional[EpochMetrics] = None
+    epochs_no_improve = 0
+    history: List[EpochMetrics] = []
+
+    for epoch in range(1, args.epochs + 1):
+        with visualizer.on_epoch_start(epoch, len(train_loader)) as batch_ctx:
+            train_loss = train_one_epoch(
+                model, train_loader, criterion, optimizer, device, batch_ctx
+            )
+
+        dev_metrics, _, _ = evaluate(
+            model, dev_loader, criterion=criterion, device=device
+        )
+
+        is_best = False
+        if dev_metrics["eer"] is not None:
+            if best_eer is None or dev_metrics["eer"] < best_eer:
+                is_best = True
+                best_eer = dev_metrics["eer"]
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+
+        improved = (
+            prev_metrics is not None
+            and prev_metrics.dev_eer is not None
+            and dev_metrics["eer"] is not None
+            and dev_metrics["eer"] < prev_metrics.dev_eer
+        )
+
+        metrics = EpochMetrics(
+            epoch=epoch,
+            train_loss=train_loss,
+            dev_loss=dev_metrics["avg_loss"],
+            dev_eer=dev_metrics["eer"],
+            is_best=is_best,
+            improved=improved,
+            epochs_no_improve=epochs_no_improve,
+        )
+        visualizer.on_epoch_end(metrics, prev_metrics)
+        history.append(metrics)
+        prev_metrics = metrics
+
+        if is_best:
+            best_metrics = metrics
+            save_checkpoint(
+                model,
+                optimizer,
+                epoch,
+                args,
+                os.path.join(args.checkpoint_dir, f"{model_name}_best.pt"),
+            )
+
+        if args.early_stop and epochs_no_improve >= args.early_stop:
+            print(
+                f"\nEarly stopping {model_name} at epoch {epoch} "
+                f"(no improvement in {args.early_stop} epochs)"
+            )
+            break
+
+    visualizer.on_training_end(history)
+    save_checkpoint(
+        model,
+        optimizer,
+        history[-1].epoch if history else args.epochs,
+        args,
+        os.path.join(args.checkpoint_dir, f"{model_name}_last.pt"),
+    )
+
+    return {
+        "model": model_name,
+        "seed": seed,
+        "best_eer": best_metrics.dev_eer if best_metrics else None,
+        "best_epoch": best_metrics.epoch if best_metrics else None,
+        "best_dev_loss": best_metrics.dev_loss if best_metrics else None,
+        "history": history,
+    }
+
+
+def train_one_epoch(model, dataloader, criterion, optimizer, device, batch_context=None):
+    model.train()
+    total_loss = 0.0
+    total_count = 0
+
+    for batch_idx, (features, labels) in enumerate(dataloader):
+        features = features.to(device)
+        labels = labels.to(device)
+
+        logits = model(features).squeeze(-1)
+        loss = criterion(logits, labels)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item() * labels.size(0)
+        total_count += labels.size(0)
+
+        if batch_context is not None and total_count > 0:
+            batch_context.update_batch(
+                BatchMetrics(
+                    batch_idx=batch_idx,
+                    running_loss=total_loss / total_count,
+                    batch_size=labels.size(0),
+                )
+            )
+
+    return (total_loss / total_count) if total_count > 0 else None
+
+
+def save_results_csv(results: List[Dict], path: str, fieldnames: List[str]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(results)
+
+
+def save_results_plot(results: List[Dict], path: str) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        print("matplotlib not available; skipping plot generation.")
+        return
+
+    models = [r["model"] for r in results]
+    eers = [r["mean_eer"] if r["mean_eer"] is not None else 1.0 for r in results]
+    yerr = [r["std_eer"] if r["std_eer"] is not None else 0.0 for r in results]
+
+    plt.figure(figsize=(8, 4))
+    plt.bar(models, eers, color="#4c78a8", yerr=yerr, capsize=4)
+    plt.title("Best Dev EER by Model (lower is better)")
+    plt.ylabel("Best Dev EER")
+    plt.tight_layout()
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    plt.savefig(path, dpi=200)
+    plt.close()
+
+
+def flatten_history(model_name: str, seed: int, history: List[EpochMetrics]) -> List[Dict]:
+    rows = []
+    for m in history:
+        rows.append(
+            {
+                "model": model_name,
+                "seed": seed,
+                "epoch": m.epoch,
+                "train_loss": m.train_loss,
+                "dev_loss": m.dev_loss,
+                "dev_eer": m.dev_eer,
+                "is_best": m.is_best,
+            }
+        )
+    return rows
+
+
+def aggregate_history(rows: List[Dict]) -> Dict[int, Dict[str, float]]:
+    by_epoch: Dict[int, Dict[str, List[float]]] = {}
+    for r in rows:
+        epoch = int(r["epoch"])
+        by_epoch.setdefault(epoch, {"train_loss": [], "dev_loss": [], "dev_eer": []})
+        if r["train_loss"] is not None:
+            by_epoch[epoch]["train_loss"].append(float(r["train_loss"]))
+        if r["dev_loss"] is not None:
+            by_epoch[epoch]["dev_loss"].append(float(r["dev_loss"]))
+        if r["dev_eer"] is not None:
+            by_epoch[epoch]["dev_eer"].append(float(r["dev_eer"]))
+
+    stats: Dict[int, Dict[str, float]] = {}
+    for epoch, vals in by_epoch.items():
+        stats[epoch] = {
+            "train_loss_mean": float(np.mean(vals["train_loss"])) if vals["train_loss"] else None,
+            "train_loss_std": float(np.std(vals["train_loss"])) if len(vals["train_loss"]) > 1 else 0.0 if vals["train_loss"] else None,
+            "dev_loss_mean": float(np.mean(vals["dev_loss"])) if vals["dev_loss"] else None,
+            "dev_loss_std": float(np.std(vals["dev_loss"])) if len(vals["dev_loss"]) > 1 else 0.0 if vals["dev_loss"] else None,
+            "dev_eer_mean": float(np.mean(vals["dev_eer"])) if vals["dev_eer"] else None,
+            "dev_eer_std": float(np.std(vals["dev_eer"])) if len(vals["dev_eer"]) > 1 else 0.0 if vals["dev_eer"] else None,
+        }
+    return stats
+
+
+def estimate_overfit_epoch(stats: Dict[int, Dict[str, float]]) -> Optional[int]:
+    epochs = sorted(stats.keys())
+    if len(epochs) < 4:
+        return None
+    for i in range(2, len(epochs)):
+        e0, e1, e2 = epochs[i - 2], epochs[i - 1], epochs[i]
+        t0 = stats[e0]["train_loss_mean"]
+        t1 = stats[e1]["train_loss_mean"]
+        t2 = stats[e2]["train_loss_mean"]
+        d0 = stats[e0]["dev_loss_mean"]
+        d1 = stats[e1]["dev_loss_mean"]
+        d2 = stats[e2]["dev_loss_mean"]
+        if None in (t0, t1, t2, d0, d1, d2):
+            continue
+        train_down = (t2 < t1) and (t1 <= t0)
+        dev_up = (d2 > d1) and (d1 >= d0)
+        if train_down and dev_up:
+            return e2
+    return None
+
+
+def save_model_curves_plot(
+    model_name: str,
+    stats: Dict[int, Dict[str, float]],
+    path: str,
+) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        print("matplotlib not available; skipping plot generation.")
+        return
+
+    epochs = sorted(stats.keys())
+    def to_float_list(key: str):
+        return [stats[e][key] if stats[e][key] is not None else np.nan for e in epochs]
+
+    train_mean = to_float_list("train_loss_mean")
+    train_std = to_float_list("train_loss_std")
+    dev_mean = to_float_list("dev_loss_mean")
+    dev_std = to_float_list("dev_loss_std")
+    eer_mean = to_float_list("dev_eer_mean")
+    eer_std = to_float_list("dev_eer_std")
+
+    plt.figure(figsize=(10, 6))
+
+    plt.subplot(2, 1, 1)
+    plt.plot(epochs, train_mean, label="train loss", color="#4c78a8")
+    plt.plot(epochs, dev_mean, label="dev loss", color="#f58518")
+    train_mean_arr = np.array(train_mean, dtype=float)
+    train_std_arr = np.array(train_std, dtype=float)
+    dev_mean_arr = np.array(dev_mean, dtype=float)
+    dev_std_arr = np.array(dev_std, dtype=float)
+    eer_mean_arr = np.array(eer_mean, dtype=float)
+    eer_std_arr = np.array(eer_std, dtype=float)
+
+    if not np.all(np.isnan(train_std_arr)) and np.nanmax(train_std_arr) > 0:
+        plt.fill_between(epochs, train_mean_arr - train_std_arr, train_mean_arr + train_std_arr, alpha=0.15, color="#4c78a8")
+    if not np.all(np.isnan(dev_std_arr)) and np.nanmax(dev_std_arr) > 0:
+        plt.fill_between(epochs, dev_mean_arr - dev_std_arr, dev_mean_arr + dev_std_arr, alpha=0.15, color="#f58518")
+    plt.ylabel("Loss")
+    plt.legend()
+
+    plt.subplot(2, 1, 2)
+    plt.plot(epochs, eer_mean, label="dev EER", color="#54a24b")
+    if not np.all(np.isnan(eer_std_arr)) and np.nanmax(eer_std_arr) > 0:
+        plt.fill_between(epochs, eer_mean_arr - eer_std_arr, eer_mean_arr + eer_std_arr, alpha=0.15, color="#54a24b")
+    plt.xlabel("Epoch")
+    plt.ylabel("EER")
+    plt.legend()
+
+    plt.suptitle(f"{model_name} - Training Curves")
+    plt.tight_layout()
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    plt.savefig(path, dpi=200)
+    plt.close()
+
+
+def write_report(
+    path: str,
+    summary_results: List[Dict],
+    per_model_stats: Dict[str, Dict[int, Dict[str, float]]],
+    overfit_epochs: Dict[str, Optional[int]],
+    plot_paths: Dict[str, str],
+    args,
+) -> None:
+    lines = []
+    lines.append("# Model Comparison Report")
+    lines.append("")
+    lines.append("## Experiment Setup")
+    lines.append(f"- Epochs: {args.epochs}")
+    lines.append(f"- Batch size: {args.batch_size}")
+    lines.append(f"- Learning rate: {args.lr}")
+    lines.append(f"- Dropout: {args.dropout}")
+    lines.append(f"- Pool bins (CNN1D): {args.pool_bins}")
+    lines.append(f"- Seeds: {args.seeds}")
+    lines.append("- Optimizer policy:")
+    lines.append("  - CNNs: AdamW with weight decay 0.01 by default (unless --weight-decay overrides)")
+    lines.append("  - MLPs: Adam unless --weight-decay > 0")
+    lines.append("")
+    lines.append("## Summary Table (mean EER, lower is better)")
+    lines.append("")
+    lines.append("| Model | Mean EER | Std | Best EER | Best Epoch | Best Seed |")
+    lines.append("|---|---:|---:|---:|---:|---:|")
+    for r in summary_results:
+        mean_eer = f"{r['mean_eer']:.4f}" if r["mean_eer"] is not None else "N/A"
+        std_eer = f"{r['std_eer']:.4f}" if r["std_eer"] is not None else "N/A"
+        best_eer = f"{r['best_eer']:.4f}" if r["best_eer"] is not None else "N/A"
+        lines.append(
+            f"| {r['model']} | {mean_eer} | {std_eer} | {best_eer} | {r['best_epoch']} | {r['best_seed']} |"
+        )
+    lines.append("")
+    lines.append("## Overfitting Signals (heuristic)")
+    lines.append("First epoch where average train loss keeps decreasing while average dev loss rises for two consecutive steps.")
+    lines.append("")
+    for model, epoch in overfit_epochs.items():
+        if epoch is None:
+            lines.append(f"- {model}: no clear overfitting signal in averaged curves")
+        else:
+            lines.append(f"- {model}: potential overfitting starts around epoch {epoch}")
+    lines.append("")
+    lines.append("## Plots")
+    for model, plot_path in plot_paths.items():
+        rel_path = plot_path.replace(os.getcwd() + os.sep, "")
+        lines.append(f"- {model}: `{rel_path}`")
+    lines.append("")
+    lines.append("## Notes / Justifications")
+    lines.append("- Mean pooling vs max pooling: mean pooling preserves the average energy pattern across time and is less sensitive to single-frame outliers; max pooling can over-emphasize spiky artifacts and destabilize training for this dataset.")
+    lines.append("- CNNs preserve local temporal patterns that MLP pooling removes; this typically improves EER when deepfake artifacts are short and localized.")
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+
+
+def main():
+    args = parse_args()
+    device = resolve_device(args.device)
+
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
+    os.makedirs(args.results_dir, exist_ok=True)
+
+    models = [m.strip() for m in args.models.split(",") if m.strip()]
+    seeds = parse_seeds(args.seeds)
+
+    run_results = []
+    summary_results = []
+    epoch_rows = []
+    per_model_stats = {}
+    overfit_epochs = {}
+    plot_paths = {}
+
+    for model_name in models:
+        model_runs = []
+        for seed in seeds:
+            print(f"\n=== Training {model_name} (seed {seed}) ===")
+            set_seed(seed)
+            result = train_one_model(model_name, args, device, seed)
+            run_results.append(
+                {
+                    "model": result["model"],
+                    "seed": result["seed"],
+                    "best_eer": result["best_eer"],
+                    "best_epoch": result["best_epoch"],
+                    "best_dev_loss": result["best_dev_loss"],
+                }
+            )
+            model_runs.append(result)
+            epoch_rows.extend(flatten_history(model_name, seed, result["history"]))
+
+        eers = [r["best_eer"] for r in model_runs if r["best_eer"] is not None]
+        mean_eer = float(np.mean(eers)) if eers else None
+        if len(eers) > 1:
+            std_eer = float(np.std(eers))
+        elif len(eers) == 1:
+            std_eer = 0.0
+        else:
+            std_eer = None
+        best_run = min(model_runs, key=lambda r: float("inf") if r["best_eer"] is None else r["best_eer"])
+
+        summary_results.append(
+            {
+                "model": model_name,
+                "mean_eer": mean_eer,
+                "std_eer": std_eer,
+                "best_eer": best_run["best_eer"],
+                "best_epoch": best_run["best_epoch"],
+                "best_seed": best_run["seed"],
+                "runs": len(model_runs),
+            }
+        )
+
+    summary_results.sort(key=lambda r: (r["mean_eer"] is None, r["mean_eer"]))
+
+    runs_csv_path = os.path.join(args.results_dir, "model_runs.csv")
+    epochs_csv_path = os.path.join(args.results_dir, "model_epochs.csv")
+    ranking_csv_path = os.path.join(args.results_dir, "model_ranking.csv")
+    plot_path = os.path.join(args.results_dir, "model_ranking.png")
+
+    save_results_csv(
+        run_results,
+        runs_csv_path,
+        fieldnames=["model", "seed", "best_eer", "best_epoch", "best_dev_loss"],
+    )
+    save_results_csv(
+        epoch_rows,
+        epochs_csv_path,
+        fieldnames=["model", "seed", "epoch", "train_loss", "dev_loss", "dev_eer", "is_best"],
+    )
+    save_results_csv(
+        summary_results,
+        ranking_csv_path,
+        fieldnames=["model", "mean_eer", "std_eer", "best_eer", "best_epoch", "best_seed", "runs"],
+    )
+    save_results_plot(summary_results, plot_path)
+
+    # Per-model curves + overfitting heuristics
+    for model_name in models:
+        model_epoch_rows = [r for r in epoch_rows if r["model"] == model_name]
+        stats = aggregate_history(model_epoch_rows)
+        per_model_stats[model_name] = stats
+        overfit_epochs[model_name] = estimate_overfit_epoch(stats)
+        curve_path = os.path.join(args.results_dir, "plots", f"{model_name}_curves.png")
+        save_model_curves_plot(model_name, stats, curve_path)
+        plot_paths[model_name] = curve_path
+
+    report_path = os.path.join(args.results_dir, "benchmark_report.md")
+    write_report(report_path, summary_results, per_model_stats, overfit_epochs, plot_paths, args)
+
+    print("\nModel Ranking (mean EER, lower is better):")
+    for r in summary_results:
+        print(
+            f"{r['model']}: mean_eer={r['mean_eer']} "
+            f"std={r['std_eer']} best={r['best_eer']} "
+            f"(seed {r['best_seed']}, epoch {r['best_epoch']})"
+        )
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        table = Table(title="Model Ranking (mean EER, lower is better)")
+        table.add_column("Model")
+        table.add_column("Mean EER")
+        table.add_column("Std")
+        table.add_column("Best EER")
+        table.add_column("Best Epoch")
+        table.add_column("Best Seed")
+        table.add_column("Runs")
+
+        for r in summary_results:
+            table.add_row(
+                r["model"],
+                f"{r['mean_eer']:.4f}" if r["mean_eer"] is not None else "N/A",
+                f"{r['std_eer']:.4f}" if r["std_eer"] is not None else "N/A",
+                f"{r['best_eer']:.4f}" if r["best_eer"] is not None else "N/A",
+                str(r["best_epoch"]),
+                str(r["best_seed"]),
+                str(r["runs"]),
+            )
+
+        Console().print(table)
+    except Exception:
+        pass
+
+    print(f"\nSaved CSV (runs): {runs_csv_path}")
+    print(f"Saved CSV (epochs): {epochs_csv_path}")
+    print(f"Saved CSV (ranking): {ranking_csv_path}")
+    print(f"Saved report: {report_path}")
+    if os.path.exists(plot_path):
+        print(f"Saved plot: {plot_path}")
+
+
+if __name__ == "__main__":
+    main()

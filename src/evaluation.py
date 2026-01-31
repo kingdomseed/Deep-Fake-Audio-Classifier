@@ -94,13 +94,18 @@ if __name__ == "__main__":
     parser.add_argument("--features", required=True, help="Path to features.pkl")
     parser.add_argument("--labels", required=True, help="Path to labels.pkl")
     parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
-    parser.add_argument("--model", default="mlp", choices=["mlp", "cnn1d", "cnn2d"])
+    parser.add_argument(
+        "--model",
+        default="mlp",
+        choices=["mlp", "stats_mlp", "cnn1d", "cnn1d_spatial", "cnn2d", "cnn2d_spatial"],
+    )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--device", default=None, help="cuda, mps, or cpu")
     parser.add_argument("--in-features", type=int, default=321)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--pool-bins", type=int, default=1)
     args = parser.parse_args()
 
     if args.device is None:
@@ -114,10 +119,21 @@ if __name__ == "__main__":
         device = args.device
 
     model_kwargs = {}
-    if args.model == "mlp":
+    if args.model in {"mlp", "stats_mlp"}:
         model_kwargs = {
             "in_features": args.in_features,
             "hidden_dim": args.hidden_dim,
+            "dropout": args.dropout,
+        }
+    elif args.model in {"cnn1d", "cnn1d_spatial"}:
+        model_kwargs = {
+            "in_channels": args.in_features,
+            "dropout": args.dropout,
+            "pool_bins": args.pool_bins,
+        }
+    elif args.model in {"cnn2d", "cnn2d_spatial"}:
+        model_kwargs = {
+            "in_features": args.in_features,
             "dropout": args.dropout,
         }
 

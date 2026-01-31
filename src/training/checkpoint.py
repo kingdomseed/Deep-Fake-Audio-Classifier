@@ -23,6 +23,7 @@ def build_config_dict(args) -> Dict[str, Any]:
         "in_features": args.in_features,
         "hidden_dim": args.hidden_dim,
         "dropout": args.dropout,
+        "pool_bins": getattr(args, "pool_bins", None),
     }
 
 

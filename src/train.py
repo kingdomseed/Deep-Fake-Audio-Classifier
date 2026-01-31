@@ -1,5 +1,7 @@
 import argparse
 import os
+import random
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -75,7 +77,11 @@ def parse_args():
     parser.add_argument("--train-labels", default="data/train/labels.pkl")
     parser.add_argument("--dev-features", default="data/dev/features.pkl")
     parser.add_argument("--dev-labels", default="data/dev/labels.pkl")
-    parser.add_argument("--model", default="mlp", choices=["mlp", "cnn1d", "cnn2d"])
+    parser.add_argument(
+        "--model",
+        default="mlp",
+        choices=["mlp", "stats_mlp", "cnn1d", "cnn1d_spatial", "cnn2d", "cnn2d_spatial"],
+    )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--epochs", type=int, default=10)
@@ -86,13 +92,24 @@ def parse_args():
     parser.add_argument("--in-features", type=int, default=321)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--pool-bins", type=int, default=1, help="cnn1d pooling bins (1 = global avg)")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--no-rich", action="store_true", help="disable rich visualization (use basic tqdm instead)")
+    parser.add_argument("--seed", type=int, default=0)
     return parser.parse_args()
+
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def main():
     args = parse_args()
+    set_seed(args.seed)
 
     if args.device is None:
         device = (
@@ -126,10 +143,21 @@ def main():
 
     # Model
     model_kwargs = {}
-    if args.model == "mlp":
+    if args.model in {"mlp", "stats_mlp"}:
         model_kwargs = {
             "in_features": args.in_features,
             "hidden_dim": args.hidden_dim,
+            "dropout": args.dropout,
+        }
+    elif args.model in {"cnn1d", "cnn1d_spatial"}:
+        model_kwargs = {
+            "in_channels": args.in_features,
+            "dropout": args.dropout,
+            "pool_bins": args.pool_bins,
+        }
+    elif args.model in {"cnn2d", "cnn2d_spatial"}:
+        model_kwargs = {
+            "in_features": args.in_features,
             "dropout": args.dropout,
         }
     model = build_model(args.model, **model_kwargs)
@@ -137,9 +165,13 @@ def main():
 
     # Loss + optimizer (BCEWithLogitsLoss expects raw logits)
     criterion = nn.BCEWithLogitsLoss()
-    if args.weight_decay > 0:
+    use_adamw = args.model.startswith("cnn")
+    weight_decay = args.weight_decay
+    if use_adamw and weight_decay == 0.0:
+        weight_decay = 0.01
+    if weight_decay > 0:
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+            model.parameters(), lr=args.lr, weight_decay=weight_decay
         )
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -225,6 +257,10 @@ def main():
         if is_best:
             save_checkpoint(model, optimizer, epoch, args, best_path)
 
+        # Update history and prev_metrics
+        history.append(metrics)
+        prev_metrics = metrics
+
         # Check early stopping
         if args.early_stop and epochs_no_improve >= args.early_stop:
             print(
@@ -233,15 +269,12 @@ def main():
             )
             break
 
-        # Update history and prev_metrics
-        history.append(metrics)
-        prev_metrics = metrics
-
     # Display training end
     visualizer.on_training_end(history)
 
-    # Save final checkpoint
-    save_checkpoint(model, optimizer, args.epochs, args, last_path)
+    # Save final checkpoint at the last completed epoch
+    last_epoch = history[-1].epoch if history else 0
+    save_checkpoint(model, optimizer, last_epoch, args, last_path)
 
 
 if __name__ == "__main__":
