@@ -10,7 +10,7 @@ import torch.nn as nn
 from augmentation import spec_augment
 from dataloaders import make_loader
 from evaluation import evaluate
-from model import build_model
+from model import CNN2D
 from training import save_checkpoint
 from visualizers import (
     BatchContext,
@@ -93,7 +93,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="cnn2d",
-        choices=["cnn2d", "cnn2d_robust"],
+        choices=["cnn2d"],
     )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
@@ -173,13 +173,10 @@ def main():
     )
 
     # Model
-    model_kwargs = {}
-    if args.model in {"cnn2d", "cnn2d_robust"}:
-        model_kwargs = {
-            "in_features": args.in_features,
-            "dropout": args.dropout,
-        }
-    model = build_model(args.model, **model_kwargs)
+    model = CNN2D(
+        in_features=args.in_features,
+        dropout=args.dropout,
+    )
     model.to(device)
 
     # Loss + optimizer (BCEWithLogitsLoss expects raw logits)

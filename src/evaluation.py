@@ -5,7 +5,7 @@ import torch.nn as nn
 import pandas as pd
 
 from dataloaders import make_loader
-from model import build_model
+from model import CNN2D
 
 
 def calculate_eer(scores, labels):
@@ -130,8 +130,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
     parser.add_argument(
         "--model",
-        default="cnn1d",
-        choices=["cnn1d", "cnn2d", "cnn2d_spatial", "crnn", "crnn2"],
+        default="cnn2d",
+        choices=["cnn2d"],
     )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
@@ -170,23 +170,10 @@ if __name__ == "__main__":
     else:
         device = args.device
 
-    model_kwargs = {}
-    if args.model in {"cnn1d"}:
-        model_kwargs = {
-            "in_channels": args.in_features,
-            "dropout": args.dropout,
-            "pool_bins": args.pool_bins,
-        }
-    elif args.model in {"cnn2d", "cnn2d_spatial"}:
-        model_kwargs = {
-            "in_features": args.in_features,
-            "dropout": args.dropout,
-        }
-    elif args.model in {"crnn", "crnn2"}:
-        model_kwargs = {
-            "in_features": args.in_features,
-            "dropout": args.dropout,
-        }
+    model_kwargs = {
+        "in_features": args.in_features,
+        "dropout": args.dropout,
+    }
 
     if args.no_check_uttid:
         check_uttid = False
@@ -201,7 +188,7 @@ if __name__ == "__main__":
     else:
         apply_sigmoid = args.apply_sigmoid
 
-    model = build_model(args.model, **model_kwargs).to(device)
+    model = CNN2D(**model_kwargs).to(device)
 
     ckpt = torch.load(args.checkpoint, map_location=device)
     if isinstance(ckpt, dict) and "model_state" in ckpt:

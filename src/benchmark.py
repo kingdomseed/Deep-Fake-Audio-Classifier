@@ -11,7 +11,7 @@ import torch.nn as nn
 from augmentation import spec_augment
 from dataloaders import make_loader
 from evaluation import evaluate
-from model import build_model
+from model import CNN2D
 from training import save_checkpoint
 from visualizers import BatchMetrics, EpochMetrics, TrainingConfig, create_visualizer
 
@@ -112,27 +112,11 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def build_model_kwargs(model_name: str, args) -> Dict:
-    if model_name in {"cnn1d"}:
-        dropout = args.dropout
-        return {
-            "in_channels": args.in_features,
-            "dropout": dropout,
-            "pool_bins": args.pool_bins,
-        }
-    if model_name in {"cnn2d", "cnn2d_robust"}:
-        dropout = args.dropout
-        return {
-            "in_features": args.in_features,
-            "dropout": dropout,
-        }
-    if model_name in {"crnn", "crnn2"}:
-        dropout = args.dropout
-        return {
-            "in_features": args.in_features,
-            "dropout": dropout,
-        }
-    return {}
+def build_model_kwargs(args) -> Dict:
+    return {
+        "in_features": args.in_features,
+        "dropout": args.dropout,
+    }
 
 
 def parse_model_spec(spec: str) -> Tuple[str, str, bool]:
@@ -189,8 +173,8 @@ def train_one_model(
         shuffle=False,
     )
 
-    model_kwargs = build_model_kwargs(base_model, args)
-    model = build_model(base_model, **model_kwargs).to(device)
+    model_kwargs = build_model_kwargs(args)
+    model = CNN2D(**model_kwargs).to(device)
 
     criterion = nn.BCEWithLogitsLoss()
     use_adamw = base_model.startswith("cnn")
