@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from augmentation import spec_augment
 from dataloaders import make_loader
 from evaluation import evaluate
 from model import build_model
@@ -25,6 +26,7 @@ def train_one_epoch(
     optimizer,
     device: str = "cpu",
     batch_context: BatchContext | None = None,
+    augment_fn=None,
 ):
     """
     Unified training epoch loop that works with any visualizer.
@@ -36,6 +38,7 @@ def train_one_epoch(
         optimizer: Optimizer
         device: Device to train on
         batch_context: Optional BatchContext from visualizer.on_epoch_start()
+        augment_fn: Optional augmentation function to apply to features
 
     Returns:
         Average loss for the epoch
@@ -47,6 +50,10 @@ def train_one_epoch(
     for batch_idx, (features, labels) in enumerate(dataloader):
         features = features.to(device)
         labels = labels.to(device)
+
+        # Apply augmentation if provided (training only)
+        if augment_fn is not None:
+            features = augment_fn(features)
 
         logits = model(features).squeeze(-1)
         loss = criterion(logits, labels)
@@ -79,8 +86,8 @@ def parse_args():
     parser.add_argument("--dev-labels", default="data/dev/labels.pkl")
     parser.add_argument(
         "--model",
-        default="mlp",
-        choices=["cnn1d", "cnn2d", "cnn2d_spatial", "crnn", "crnn2"],
+        default="cnn2d",
+        choices=["cnn2d", "cnn2d_robust"],
     )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
@@ -96,6 +103,10 @@ def parse_args():
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--no-rich", action="store_true", help="disable rich visualization (use basic tqdm instead)")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--spec-augment", action="store_true", help="enable SpecAugment data augmentation during training")
+    parser.add_argument("--time-mask-ratio", type=float, default=0.2, help="max ratio of time steps to mask (default: 0.2)")
+    parser.add_argument("--feature-mask-ratio", type=float, default=0.1, help="max ratio of features to mask (default: 0.1)")
+    parser.add_argument("--feature-mask", action="store_true", help="enable feature masking in addition to time masking")
     return parser.parse_args()
 
 
@@ -143,18 +154,7 @@ def main():
 
     # Model
     model_kwargs = {}
-    if args.model in {"cnn1d"}:
-        model_kwargs = {
-            "in_channels": args.in_features,
-            "dropout": args.dropout,
-            "pool_bins": args.pool_bins,
-        }
-    elif args.model in {"cnn2d", "cnn2d_spatial"}:
-        model_kwargs = {
-            "in_features": args.in_features,
-            "dropout": args.dropout,
-        }
-    elif args.model in {"crnn", "crnn2"}:
+    if args.model in {"cnn2d", "cnn2d_robust"}:
         model_kwargs = {
             "in_features": args.in_features,
             "dropout": args.dropout,
@@ -174,6 +174,20 @@ def main():
         )
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    # Setup augmentation if enabled
+    augment_fn = None
+    if args.spec_augment:
+        def augment_fn(features):
+            return spec_augment(
+                features,
+                time_mask_ratio=args.time_mask_ratio,
+                feature_mask_ratio=args.feature_mask_ratio,
+                apply_time_mask=True,
+                apply_feature_mask=args.feature_mask
+            )
+        print(f"SpecAugment enabled: time_mask={args.time_mask_ratio:.2f}, "
+              f"feature_mask={args.feature_mask_ratio:.2f if args.feature_mask else 'disabled'}")
 
     # Create visualizer (Rich by default, tqdm if --no-rich)
     visualizer_type = "tqdm" if args.no_rich else "rich"
@@ -211,7 +225,8 @@ def main():
                 criterion,
                 optimizer,
                 device=device,
-                batch_context=batch_ctx
+                batch_context=batch_ctx,
+                augment_fn=augment_fn
             )
 
         # Evaluate

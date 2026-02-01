@@ -1,0 +1,143 @@
+import random
+import torch
+
+
+def time_mask(features, max_mask_ratio=0.2, min_mask_ratio=0.05):
+    """
+    SpecAugment time masking: randomly zero out a contiguous segment of time steps.
+
+    This forces the model to be robust to missing temporal information, preventing
+    overfitting to specific time locations where artifacts appear.
+
+    Args:
+        features: [B, T, F] tensor (batch, time, features)
+        max_mask_ratio: Maximum proportion of time to mask (default 0.2 = 20%)
+        min_mask_ratio: Minimum proportion of time to mask (default 0.05 = 5%)
+
+    Returns:
+        Masked features (same shape as input)
+
+    Example:
+        For T=180, max_mask_ratio=0.2:
+        - Might mask frames 42-78 (36 frames = 20%)
+        - Or frames 110-119 (9 frames = 5%)
+        - Different random segment each call
+    """
+    B, T, F = features.shape
+
+    # Random mask length between min and max ratio
+    mask_len = int(T * random.uniform(min_mask_ratio, max_mask_ratio))
+
+    # Ensure mask_len is at least 1 and doesn't exceed sequence length
+    mask_len = max(1, min(mask_len, T - 1))
+
+    # Random start position
+    start = random.randint(0, T - mask_len)
+
+    # Clone to avoid modifying in-place
+    features = features.clone()
+
+    # Zero out the time segment for all features
+    features[:, start:start+mask_len, :] = 0
+
+    return features
+
+
+def feature_mask(features, max_mask_ratio=0.1, min_mask_ratio=0.02):
+    """
+    SpecAugment feature masking: randomly zero out a contiguous segment of feature dimensions.
+
+    This forces the model to be robust to missing frequency information, preventing
+    overfitting to specific frequency bands.
+
+    Args:
+        features: [B, T, F] tensor (batch, time, features)
+        max_mask_ratio: Maximum proportion of features to mask (default 0.1 = 10%)
+        min_mask_ratio: Minimum proportion of features to mask (default 0.02 = 2%)
+
+    Returns:
+        Masked features (same shape as input)
+
+    Example:
+        For F=321, max_mask_ratio=0.1:
+        - Might mask features 100-132 (32 features = 10%)
+        - Or features 200-206 (6 features = 2%)
+        - Different random segment each call
+    """
+    B, T, F = features.shape
+
+    # Random mask length between min and max ratio
+    mask_len = int(F * random.uniform(min_mask_ratio, max_mask_ratio))
+
+    # Ensure mask_len is at least 1 and doesn't exceed feature dimension
+    mask_len = max(1, min(mask_len, F - 1))
+
+    # Random start position
+    start = random.randint(0, F - mask_len)
+
+    # Clone to avoid modifying in-place
+    features = features.clone()
+
+    # Zero out the feature segment for all time steps
+    features[:, :, start:start+mask_len] = 0
+
+    return features
+
+
+def spec_augment(features, time_mask_ratio=0.2, feature_mask_ratio=0.1,
+                 apply_time_mask=True, apply_feature_mask=False):
+    """
+    Combined SpecAugment with both time and feature masking.
+
+    Args:
+        features: [B, T, F] tensor
+        time_mask_ratio: Max ratio for time masking
+        feature_mask_ratio: Max ratio for feature masking
+        apply_time_mask: Whether to apply time masking (default True)
+        apply_feature_mask: Whether to apply feature masking (default False)
+
+    Returns:
+        Augmented features
+    """
+    if apply_time_mask:
+        features = time_mask(features, max_mask_ratio=time_mask_ratio)
+
+    if apply_feature_mask:
+        features = feature_mask(features, max_mask_ratio=feature_mask_ratio)
+
+    return features
+
+
+if __name__ == "__main__":
+    # Quick test
+    print("Testing SpecAugment...")
+
+    # Create dummy features [batch=4, time=180, features=321]
+    x = torch.randn(4, 180, 321)
+
+    print(f"\nOriginal shape: {x.shape}")
+    print(f"Original mean: {x.mean().item():.4f}")
+    print(f"Original std: {x.std().item():.4f}")
+
+    # Test time masking
+    x_time = time_mask(x.clone(), max_mask_ratio=0.2)
+    print(f"\nAfter time masking:")
+    print(f"  Shape: {x_time.shape}")
+    print(f"  Mean: {x_time.mean().item():.4f} (should be closer to 0)")
+    print(f"  Proportion of zeros: {(x_time == 0).float().mean().item():.4f}")
+
+    # Test feature masking
+    x_feat = feature_mask(x.clone(), max_mask_ratio=0.1)
+    print(f"\nAfter feature masking:")
+    print(f"  Shape: {x_feat.shape}")
+    print(f"  Mean: {x_feat.mean().item():.4f} (should be closer to 0)")
+    print(f"  Proportion of zeros: {(x_feat == 0).float().mean().item():.4f}")
+
+    # Test combined
+    x_both = spec_augment(x.clone(), apply_time_mask=True, apply_feature_mask=True)
+    print(f"\nAfter both time and feature masking:")
+    print(f"  Shape: {x_both.shape}")
+    print(f"  Mean: {x_both.mean().item():.4f}")
+    print(f"  Proportion of zeros: {(x_both == 0).float().mean().item():.4f}")
+
+    print("\nSpecAugment tests passed!")
