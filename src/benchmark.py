@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from augmentation import spec_augment
 from dataloaders import make_loader
 from evaluation import evaluate
 from model import build_model
@@ -23,7 +24,7 @@ def parse_args():
     parser.add_argument("--train-labels", default="data/train/labels.pkl")
     parser.add_argument("--dev-features", default="data/dev/features.pkl")
     parser.add_argument("--dev-labels", default="data/dev/labels.pkl")
-    parser.add_argument("--models", default="cnn1d,cnn2d,cnn2d_spatial,crnn,crnn2")
+    parser.add_argument("--models", default="cnn2d,cnn2d_robust")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--epochs", type=int, default=10)
@@ -43,6 +44,28 @@ def parse_args():
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--seeds", default="0", help="comma-separated list of seeds")
+    parser.add_argument(
+        "--spec-augment",
+        action="store_true",
+        help="enable SpecAugment for all models (time masking, optionally feature masking)",
+    )
+    parser.add_argument(
+        "--time-mask-ratio",
+        type=float,
+        default=0.2,
+        help="max ratio of time steps to mask (default: 0.2)",
+    )
+    parser.add_argument(
+        "--feature-mask-ratio",
+        type=float,
+        default=0.1,
+        help="max ratio of features to mask (default: 0.1)",
+    )
+    parser.add_argument(
+        "--feature-mask",
+        action="store_true",
+        help="enable feature masking in addition to time masking",
+    )
     parser.add_argument(
         "--visualizer",
         default="noop",
@@ -83,7 +106,7 @@ def build_model_kwargs(model_name: str, args) -> Dict:
             "dropout": dropout,
             "pool_bins": args.pool_bins,
         }
-    if model_name in {"cnn2d", "cnn2d_spatial"}:
+    if model_name in {"cnn2d", "cnn2d_robust"}:
         dropout = args.dropout
         return {
             "in_features": args.in_features,
@@ -98,7 +121,43 @@ def build_model_kwargs(model_name: str, args) -> Dict:
     return {}
 
 
-def train_one_model(model_name: str, args, device: str, seed: int) -> Dict:
+def parse_model_spec(spec: str) -> Tuple[str, str, bool]:
+    """
+    Parse model spec allowing per-model SpecAugment flag.
+    Use suffix "+specaug" to enable augmentation for a specific model.
+    Example: cnn2d+specaug
+    """
+    spec = spec.strip()
+    if spec.endswith("+specaug"):
+        base = spec[: -len("+specaug")]
+        return spec, base, True
+    return spec, spec, False
+
+
+def build_augment_fn(args, enabled: bool):
+    if not enabled:
+        return None
+
+    def augment_fn(features):
+        return spec_augment(
+            features,
+            time_mask_ratio=args.time_mask_ratio,
+            feature_mask_ratio=args.feature_mask_ratio,
+            apply_time_mask=True,
+            apply_feature_mask=args.feature_mask,
+        )
+
+    return augment_fn
+
+
+def train_one_model(
+    model_name: str,
+    base_model: str,
+    args,
+    device: str,
+    seed: int,
+    use_specaugment: bool,
+) -> Dict:
     train_loader = make_loader(
         args.train_features,
         args.train_labels,
@@ -114,11 +173,11 @@ def train_one_model(model_name: str, args, device: str, seed: int) -> Dict:
         shuffle=False,
     )
 
-    model_kwargs = build_model_kwargs(model_name, args)
-    model = build_model(model_name, **model_kwargs).to(device)
+    model_kwargs = build_model_kwargs(base_model, args)
+    model = build_model(base_model, **model_kwargs).to(device)
 
     criterion = nn.BCEWithLogitsLoss()
-    use_adamw = model_name.startswith("cnn")
+    use_adamw = base_model.startswith("cnn")
     weight_decay = args.weight_decay
     if use_adamw and weight_decay == 0.0:
         weight_decay = 0.01
@@ -128,6 +187,17 @@ def train_one_model(model_name: str, args, device: str, seed: int) -> Dict:
         )
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    augment_fn = build_augment_fn(args, args.spec_augment or use_specaugment)
+    if augment_fn is not None:
+        feature_mask_status = (
+            f"{args.feature_mask_ratio:.2f}" if args.feature_mask else "disabled"
+        )
+        print(
+            f"SpecAugment enabled for {model_name}: "
+            f"time_mask={args.time_mask_ratio:.2f}, "
+            f"feature_mask={feature_mask_status}"
+        )
 
     visualizer = create_visualizer(args.visualizer)
     config = TrainingConfig(
@@ -153,7 +223,13 @@ def train_one_model(model_name: str, args, device: str, seed: int) -> Dict:
     for epoch in range(1, args.epochs + 1):
         with visualizer.on_epoch_start(epoch, len(train_loader)) as batch_ctx:
             train_loss = train_one_epoch(
-                model, train_loader, criterion, optimizer, device, batch_ctx
+                model,
+                train_loader,
+                criterion,
+                optimizer,
+                device,
+                batch_ctx,
+                augment_fn=augment_fn,
             )
 
         dev_metrics, _, _ = evaluate(
@@ -225,7 +301,15 @@ def train_one_model(model_name: str, args, device: str, seed: int) -> Dict:
     }
 
 
-def train_one_epoch(model, dataloader, criterion, optimizer, device, batch_context=None):
+def train_one_epoch(
+    model,
+    dataloader,
+    criterion,
+    optimizer,
+    device,
+    batch_context=None,
+    augment_fn=None,
+):
     model.train()
     total_loss = 0.0
     total_count = 0
@@ -233,6 +317,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, batch_conte
     for batch_idx, (features, labels) in enumerate(dataloader):
         features = features.to(device)
         labels = labels.to(device)
+
+        if augment_fn is not None:
+            features = augment_fn(features)
 
         logits = model(features).squeeze(-1)
         loss = criterion(logits, labels)
@@ -539,12 +626,20 @@ def main():
     overfit_epochs = {}
     plot_paths = {}
 
-    for model_name in models:
+    for model_spec in models:
+        model_name, base_model, use_specaugment = parse_model_spec(model_spec)
         model_runs = []
         for seed in seeds:
             print(f"\n=== Training {model_name} (seed {seed}) ===")
             set_seed(seed)
-            result = train_one_model(model_name, args, device, seed)
+            result = train_one_model(
+                model_name,
+                base_model,
+                args,
+                device,
+                seed,
+                use_specaugment,
+            )
             run_results.append(
                 {
                     "model": result["model"],
