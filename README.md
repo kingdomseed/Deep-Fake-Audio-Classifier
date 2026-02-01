@@ -1,7 +1,6 @@
 # Mini Project: Audio Deepfake Detection via Binary Classification
 
-IMPORTANT: This is a **PREVIEW** version of the project. The data and scripts are not final.
-The final version will be released on **Jan 27**.
+IMPORTANT: The data and scripts in this repo are final.
 
 ## 1. Overview
 
