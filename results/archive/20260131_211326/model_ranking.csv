@@ -1,2 +1,0 @@
-model,mean_eer,std_eer,best_eer,best_epoch,best_seed,runs
-cnn2d,0.004487261966031909,0.0,0.004487261966031909,10,42,1

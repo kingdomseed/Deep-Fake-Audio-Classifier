@@ -303,7 +303,24 @@ def flatten_history(model_name: str, seed: int, history: List[EpochMetrics]) -> 
     return rows
 
 
-def aggregate_history(rows: List[Dict]) -> Dict[int, Dict[str, float]]:
+def avg_losses_up_to_best(model_epoch_rows: List[Dict], seed: int, model_name: str):
+    df = [r for r in model_epoch_rows if r["seed"] == seed and r["model"] == model_name]
+    if not df:
+        return None, None, None
+    # find best epoch by dev_eer
+    best_row = min(df, key=lambda r: float("inf") if r["dev_eer"] is None else r["dev_eer"])
+    best_epoch = best_row["epoch"]
+    upto = [r for r in df if r["epoch"] <= best_epoch]
+    if not upto:
+        return best_epoch, None, None
+    train_vals = [r["train_loss"] for r in upto if r["train_loss"] is not None]
+    dev_vals = [r["dev_loss"] for r in upto if r["dev_loss"] is not None]
+    avg_train = float(np.mean(train_vals)) if train_vals else None
+    avg_dev = float(np.mean(dev_vals)) if dev_vals else None
+    return best_epoch, avg_train, avg_dev
+
+
+def aggregate_history(rows: List[Dict]) -> Dict[int, Dict[str, Optional[float]]]:
     by_epoch: Dict[int, Dict[str, List[float]]] = {}
     for r in rows:
         epoch = int(r["epoch"])
@@ -315,7 +332,7 @@ def aggregate_history(rows: List[Dict]) -> Dict[int, Dict[str, float]]:
         if r["dev_eer"] is not None:
             by_epoch[epoch]["dev_eer"].append(float(r["dev_eer"]))
 
-    stats: Dict[int, Dict[str, float]] = {}
+    stats: Dict[int, Dict[str, Optional[float]]] = {}
     for epoch, vals in by_epoch.items():
         stats[epoch] = {
             "train_loss_mean": float(np.mean(vals["train_loss"])) if vals["train_loss"] else None,
@@ -430,14 +447,16 @@ def write_report(
     lines.append("")
     lines.append("## Summary Table (mean EER, lower is better)")
     lines.append("")
-    lines.append("| Model | Mean EER | Std | Best EER | Best Epoch | Best Seed |")
-    lines.append("|---|---:|---:|---:|---:|---:|")
+    lines.append("| Model | Mean EER | Std | Best EER | Best Epoch | Best Seed | Avg Train Loss (<= best) | Avg Dev Loss (<= best) |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     for r in summary_results:
         mean_eer = f"{r['mean_eer']:.4f}" if r["mean_eer"] is not None else "N/A"
         std_eer = f"{r['std_eer']:.4f}" if r["std_eer"] is not None else "N/A"
         best_eer = f"{r['best_eer']:.4f}" if r["best_eer"] is not None else "N/A"
+        avg_train = f"{r['avg_train_loss_upto_best']:.4f}" if r.get("avg_train_loss_upto_best") is not None else "N/A"
+        avg_dev = f"{r['avg_dev_loss_upto_best']:.4f}" if r.get("avg_dev_loss_upto_best") is not None else "N/A"
         lines.append(
-            f"| {r['model']} | {mean_eer} | {std_eer} | {best_eer} | {r['best_epoch']} | {r['best_seed']} |"
+            f"| {r['model']} | {mean_eer} | {std_eer} | {best_eer} | {r['best_epoch']} | {r['best_seed']} | {avg_train} | {avg_dev} |"
         )
     lines.append("")
     lines.append("## Overfitting Signals (heuristic)")
@@ -548,6 +567,12 @@ def main():
             std_eer = None
         best_run = min(model_runs, key=lambda r: float("inf") if r["best_eer"] is None else r["best_eer"])
 
+        # compute averages up to best epoch for the best seed
+        best_seed = best_run["seed"]
+        best_epoch, avg_train_upto_best, avg_dev_upto_best = avg_losses_up_to_best(
+            epoch_rows, best_seed, model_name
+        )
+
         summary_results.append(
             {
                 "model": model_name,
@@ -555,7 +580,9 @@ def main():
                 "std_eer": std_eer,
                 "best_eer": best_run["best_eer"],
                 "best_epoch": best_run["best_epoch"],
-                "best_seed": best_run["seed"],
+                "best_seed": best_seed,
+                "avg_train_loss_upto_best": avg_train_upto_best,
+                "avg_dev_loss_upto_best": avg_dev_upto_best,
                 "runs": len(model_runs),
             }
         )
@@ -580,7 +607,17 @@ def main():
     save_results_csv(
         summary_results,
         ranking_csv_path,
-        fieldnames=["model", "mean_eer", "std_eer", "best_eer", "best_epoch", "best_seed", "runs"],
+        fieldnames=[
+            "model",
+            "mean_eer",
+            "std_eer",
+            "best_eer",
+            "best_epoch",
+            "best_seed",
+            "avg_train_loss_upto_best",
+            "avg_dev_loss_upto_best",
+            "runs",
+        ],
     )
     save_results_plot(summary_results, plot_path)
 
@@ -620,6 +657,8 @@ def main():
         table.add_column("Best EER")
         table.add_column("Best Epoch")
         table.add_column("Best Seed")
+        table.add_column("Avg Train (<= best)")
+        table.add_column("Avg Dev (<= best)")
         table.add_column("Runs")
 
         for r in summary_results:
@@ -630,6 +669,8 @@ def main():
                 f"{r['best_eer']:.4f}" if r["best_eer"] is not None else "N/A",
                 str(r["best_epoch"]),
                 str(r["best_seed"]),
+                f"{r['avg_train_loss_upto_best']:.4f}" if r.get("avg_train_loss_upto_best") is not None else "N/A",
+                f"{r['avg_dev_loss_upto_best']:.4f}" if r.get("avg_dev_loss_upto_best") is not None else "N/A",
                 str(r["runs"]),
             )
 
