@@ -18,8 +18,8 @@ def time_mask(features, max_mask_ratio=0.2, min_mask_ratio=0.05):
         Masked features (same shape as input)
 
     Example:
-        For T=180, max_mask_ratio=0.2:
-        - Might mask frames 42-78 (36 frames = 20%)
+        For T=321, max_mask_ratio=0.2:
+        - Might mask frames 70-134 (64 frames = 20%)
         - Or frames 110-119 (9 frames = 5%)
         - Different random segment each call
     """
@@ -59,9 +59,9 @@ def feature_mask(features, max_mask_ratio=0.1, min_mask_ratio=0.02):
         Masked features (same shape as input)
 
     Example:
-        For F=321, max_mask_ratio=0.1:
-        - Might mask features 100-132 (32 features = 10%)
-        - Or features 200-206 (6 features = 2%)
+        For F=180, max_mask_ratio=0.1:
+        - Might mask features 60-78 (18 features = 10%)
+        - Or features 120-123 (3 features = 2%)
         - Different random segment each call
     """
     B, T, F = features.shape
@@ -112,8 +112,8 @@ if __name__ == "__main__":
     # Quick test
     print("Testing SpecAugment...")
 
-    # Create dummy features [batch=4, time=180, features=321]
-    x = torch.randn(4, 180, 321)
+    # Create dummy features [batch=4, time=321, features=180]
+    x = torch.randn(4, 321, 180)
 
     print(f"\nOriginal shape: {x.shape}")
     print(f"Original mean: {x.mean().item():.4f}")

@@ -7,8 +7,8 @@ class AudioDeepfakeDataset(Dataset):
     """
     Dataset class for audio deepfake detection.
     Returns (features, label) pairs where:
-        - features: torch.Tensor of shape (seq_len, feature_dim)
-        - shape = [180, 321]
+        - features: torch.Tensor of shape (feature_dim, seq_len)
+        - stored shape = [180, 321] (feature_dim=180, seq_len=321)
         - label: int (0=deepfake, 1=real)
     """
 

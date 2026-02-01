@@ -16,12 +16,25 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--device", default=None, help="cuda, mps, or cpu")
-    parser.add_argument("--in-features", type=int, default=321)
+    parser.add_argument("--in-features", type=int, default=180)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--pool-bins", type=int, default=1)
     parser.add_argument("--apply-sigmoid", action="store_true", default=True)
     parser.add_argument("--no-apply-sigmoid", action="store_true", default=False)
-    parser.add_argument("--swap-tf", action="store_true", help="swap time and feature dimensions (T <-> F)")
+    swap_group = parser.add_mutually_exclusive_group()
+    swap_group.add_argument(
+        "--swap-tf",
+        dest="swap_tf",
+        action="store_true",
+        help="swap time and feature dimensions (T <-> F) (default)",
+    )
+    swap_group.add_argument(
+        "--no-swap-tf",
+        dest="swap_tf",
+        action="store_false",
+        help="disable time/feature swap",
+    )
+    parser.set_defaults(swap_tf=True)
     return parser.parse_args()
 
 

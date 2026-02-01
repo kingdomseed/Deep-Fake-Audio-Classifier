@@ -1,6 +1,8 @@
 import argparse
 import os
 import random
+from typing import Callable, Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -26,7 +28,7 @@ def train_one_epoch(
     optimizer,
     device: str = "cpu",
     batch_context: BatchContext | None = None,
-    augment_fn=None,
+    augment_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     swap_tf: bool = False,
 ):
     """
@@ -100,7 +102,7 @@ def parse_args():
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--early-stop", type=int, default=0, help="patience in epochs (0 disables)")
     parser.add_argument("--device", default=None, help="cuda, mps, or cpu")
-    parser.add_argument("--in-features", type=int, default=321)
+    parser.add_argument("--in-features", type=int, default=180)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--pool-bins", type=int, default=1, help="cnn1d pooling bins (1 = global avg)")
@@ -111,7 +113,20 @@ def parse_args():
     parser.add_argument("--time-mask-ratio", type=float, default=0.2, help="max ratio of time steps to mask (default: 0.2)")
     parser.add_argument("--feature-mask-ratio", type=float, default=0.1, help="max ratio of features to mask (default: 0.1)")
     parser.add_argument("--feature-mask", action="store_true", help="enable feature masking in addition to time masking")
-    parser.add_argument("--swap-tf", action="store_true", help="swap time and feature dimensions (T <-> F)")
+    swap_group = parser.add_mutually_exclusive_group()
+    swap_group.add_argument(
+        "--swap-tf",
+        dest="swap_tf",
+        action="store_true",
+        help="swap time and feature dimensions (T <-> F) (default)",
+    )
+    swap_group.add_argument(
+        "--no-swap-tf",
+        dest="swap_tf",
+        action="store_false",
+        help="disable time/feature swap",
+    )
+    parser.set_defaults(swap_tf=True)
     return parser.parse_args()
 
 
@@ -181,18 +196,25 @@ def main():
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # Setup augmentation if enabled
-    augment_fn = None
+    augment_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None
     if args.spec_augment:
-        def augment_fn(features):
+        def _augment_fn(features: torch.Tensor) -> torch.Tensor:
             return spec_augment(
                 features,
                 time_mask_ratio=args.time_mask_ratio,
                 feature_mask_ratio=args.feature_mask_ratio,
                 apply_time_mask=True,
-                apply_feature_mask=args.feature_mask
+                apply_feature_mask=args.feature_mask,
             )
-        print(f"SpecAugment enabled: time_mask={args.time_mask_ratio:.2f}, "
-              f"feature_mask={args.feature_mask_ratio:.2f if args.feature_mask else 'disabled'}")
+
+        augment_fn = _augment_fn
+        feature_mask_status = (
+            f"{args.feature_mask_ratio:.2f}" if args.feature_mask else "disabled"
+        )
+        print(
+            f"SpecAugment enabled: time_mask={args.time_mask_ratio:.2f}, "
+            f"feature_mask={feature_mask_status}"
+        )
 
     # Create visualizer (Rich by default, tqdm if --no-rich)
     visualizer_type = "tqdm" if args.no_rich else "rich"

@@ -2,7 +2,7 @@ import argparse
 import csv
 import os
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--early-stop", type=int, default=3)
     parser.add_argument("--device", default=None)
-    parser.add_argument("--in-features", type=int, default=321)
+    parser.add_argument("--in-features", type=int, default=180)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument(
         "--dropout",
@@ -66,11 +66,20 @@ def parse_args():
         action="store_true",
         help="enable feature masking in addition to time masking",
     )
-    parser.add_argument(
+    swap_group = parser.add_mutually_exclusive_group()
+    swap_group.add_argument(
         "--swap-tf",
+        dest="swap_tf",
         action="store_true",
-        help="swap time and feature dimensions (T <-> F) before model",
+        help="swap time and feature dimensions (T <-> F) before model (default)",
     )
+    swap_group.add_argument(
+        "--no-swap-tf",
+        dest="swap_tf",
+        action="store_false",
+        help="disable time/feature swap before model",
+    )
+    parser.set_defaults(swap_tf=True)
     parser.add_argument(
         "--visualizer",
         default="noop",
@@ -139,7 +148,9 @@ def parse_model_spec(spec: str) -> Tuple[str, str, bool]:
     return spec, spec, False
 
 
-def build_augment_fn(args, enabled: bool):
+def build_augment_fn(
+    args, enabled: bool
+) -> Optional[Callable[[torch.Tensor], torch.Tensor]]:
     if not enabled:
         return None
 
@@ -318,7 +329,7 @@ def train_one_epoch(
     optimizer,
     device,
     batch_context=None,
-    augment_fn=None,
+    augment_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     swap_tf: bool = False,
 ):
     model.train()

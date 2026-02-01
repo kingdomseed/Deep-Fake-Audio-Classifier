@@ -1,0 +1,2 @@
+model,seed,best_eer,best_epoch,best_dev_loss
+cnn2d,0,0.0,10,0.008039199255872518

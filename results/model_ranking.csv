@@ -1,0 +1,2 @@
+model,mean_eer,std_eer,best_eer,best_epoch,best_seed,avg_train_loss_upto_best,avg_dev_loss_upto_best,runs
+cnn2d,0.0,0.0,0.0,10,0,0.058689271242003446,0.057546945752413,1

@@ -9,7 +9,7 @@ class CNN2D(nn.Module):
     Best performing model: 0.55% EER on dev set.
     """
 
-    def __init__(self, in_features=321, base_channels=32, num_classes=1, dropout=0.2):
+    def __init__(self, in_features=180, base_channels=32, num_classes=1, dropout=0.2):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(1, base_channels, kernel_size=3, padding=1),
@@ -53,7 +53,7 @@ class CNN2D_Robust(nn.Module):
     Input x: (B, T, F) -> add channel dim to (B, 1, T, F)
     """
 
-    def __init__(self, in_features=321, base_channels=64, num_classes=1, dropout=0.3):
+    def __init__(self, in_features=180, base_channels=64, num_classes=1, dropout=0.3):
         super().__init__()
 
         # Residual blocks
@@ -139,7 +139,7 @@ def build_model(name: str, **kwargs):
 
 if __name__ == "__main__":
     model = CNN2D()
-    x = torch.randn(4, 180, 321)
+    x = torch.randn(4, 321, 180)
     logits = model(x)
     print(f"CNN2D output shape: {logits.shape}")  # should be torch.Size([4, 1])
 

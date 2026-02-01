@@ -73,7 +73,9 @@ Example output:
 ```
 
 - `raw_31131` is the utterance id
-- `features` is a `torch.Tensor` of shape `[180, 321]` (180 time frames × 321 feature dimensions)
+- `features` is a `torch.Tensor` of shape `[180, 321]` (feature_dim=180, seq_len=321)
+- Our training/eval scripts **swap time and feature axes by default**, so the model sees shape `[321, 180]`.
+  Use `--no-swap-tf` if you want the original orientation.
 
 **2.2.2 labels.pkl example:**
 
