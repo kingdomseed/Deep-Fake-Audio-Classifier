@@ -11,6 +11,7 @@ from augmentation import spec_augment
 from dataloaders import make_loader
 from evaluation import evaluate
 from model import CNN2D
+from model_cnn1d import CNN1D
 from training import save_checkpoint
 from visualizers import (
     BatchContext,
@@ -93,7 +94,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="cnn2d",
-        choices=["cnn2d"],
+        choices=["cnn2d", "cnn1d"],
     )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
@@ -172,10 +173,16 @@ def main():
     )
 
     # Model
-    model = CNN2D(
-        in_features=args.in_features,
-        dropout=args.dropout,
-    )
+    if args.model == "cnn1d":
+        model = CNN1D(
+            in_features=args.in_features,
+            dropout=args.dropout,
+        )
+    else:
+        model = CNN2D(
+            in_features=args.in_features,
+            dropout=args.dropout,
+        )
     model.to(device)
 
     # Loss + optimizer (BCEWithLogitsLoss expects raw logits)
