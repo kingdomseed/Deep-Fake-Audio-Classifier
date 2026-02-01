@@ -21,6 +21,7 @@ def parse_args():
     parser.add_argument("--pool-bins", type=int, default=1)
     parser.add_argument("--apply-sigmoid", action="store_true", default=True)
     parser.add_argument("--no-apply-sigmoid", action="store_true", default=False)
+    parser.add_argument("--swap-tf", action="store_true", help="swap time and feature dimensions (T <-> F)")
     return parser.parse_args()
 
 
@@ -90,6 +91,8 @@ def main():
     with torch.no_grad():
         for features in dataloader:
             features = features.to(device)
+            if args.swap_tf:
+                features = features.transpose(1, 2)
             logits = model(features).squeeze(-1)
             if apply_sigmoid:
                 scores = torch.sigmoid(logits)

@@ -27,6 +27,7 @@ def train_one_epoch(
     device: str = "cpu",
     batch_context: BatchContext | None = None,
     augment_fn=None,
+    swap_tf: bool = False,
 ):
     """
     Unified training epoch loop that works with any visualizer.
@@ -50,6 +51,9 @@ def train_one_epoch(
     for batch_idx, (features, labels) in enumerate(dataloader):
         features = features.to(device)
         labels = labels.to(device)
+
+        if swap_tf:
+            features = features.transpose(1, 2)
 
         # Apply augmentation if provided (training only)
         if augment_fn is not None:
@@ -107,6 +111,7 @@ def parse_args():
     parser.add_argument("--time-mask-ratio", type=float, default=0.2, help="max ratio of time steps to mask (default: 0.2)")
     parser.add_argument("--feature-mask-ratio", type=float, default=0.1, help="max ratio of features to mask (default: 0.1)")
     parser.add_argument("--feature-mask", action="store_true", help="enable feature masking in addition to time masking")
+    parser.add_argument("--swap-tf", action="store_true", help="swap time and feature dimensions (T <-> F)")
     return parser.parse_args()
 
 
@@ -226,7 +231,8 @@ def main():
                 optimizer,
                 device=device,
                 batch_context=batch_ctx,
-                augment_fn=augment_fn
+                augment_fn=augment_fn,
+                swap_tf=args.swap_tf,
             )
 
         # Evaluate
@@ -234,7 +240,8 @@ def main():
             model,
             dev_loader,
             criterion=criterion,
-            device=device
+            device=device,
+            swap_tf=args.swap_tf,
         )
 
         # Determine if this is the best EER

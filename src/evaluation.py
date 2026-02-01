@@ -47,7 +47,14 @@ def calculate_eer(scores, labels):
     return float(eer), float(threshold)
 
 
-def evaluate(model, dataloader, criterion=None, device="cpu", apply_sigmoid=False):
+def evaluate(
+    model,
+    dataloader,
+    criterion=None,
+    device="cpu",
+    apply_sigmoid=False,
+    swap_tf: bool = False,
+):
     """
     Run model on a labeled dataloader and return metrics and raw outputs.
 
@@ -66,6 +73,9 @@ def evaluate(model, dataloader, criterion=None, device="cpu", apply_sigmoid=Fals
         for features, batch_labels in dataloader:
             features = features.to(device)
             batch_labels = batch_labels.to(device)
+
+            if swap_tf:
+                features = features.transpose(1, 2)
 
             logits = model(features).squeeze(-1)
 
@@ -134,6 +144,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-check-uttid", action="store_true", default=False)
     parser.add_argument("--apply-sigmoid", action="store_true", default=True)
     parser.add_argument("--no-apply-sigmoid", action="store_true", default=False)
+    parser.add_argument("--swap-tf", action="store_true", help="swap time and feature dimensions (T <-> F)")
     args = parser.parse_args()
 
     if args.device is None:
@@ -200,6 +211,7 @@ if __name__ == "__main__":
         criterion=criterion,
         device=device,
         apply_sigmoid=apply_sigmoid,
+        swap_tf=args.swap_tf,
     )
 
     print(f"avg_loss={metrics['avg_loss']}")

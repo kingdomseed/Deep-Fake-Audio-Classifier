@@ -67,6 +67,11 @@ def parse_args():
         help="enable feature masking in addition to time masking",
     )
     parser.add_argument(
+        "--swap-tf",
+        action="store_true",
+        help="swap time and feature dimensions (T <-> F) before model",
+    )
+    parser.add_argument(
         "--visualizer",
         default="noop",
         choices=["rich", "tqdm", "noop"],
@@ -230,10 +235,15 @@ def train_one_model(
                 device,
                 batch_ctx,
                 augment_fn=augment_fn,
+                swap_tf=args.swap_tf,
             )
 
         dev_metrics, _, _ = evaluate(
-            model, dev_loader, criterion=criterion, device=device
+            model,
+            dev_loader,
+            criterion=criterion,
+            device=device,
+            swap_tf=args.swap_tf,
         )
 
         is_best = False
@@ -309,6 +319,7 @@ def train_one_epoch(
     device,
     batch_context=None,
     augment_fn=None,
+    swap_tf: bool = False,
 ):
     model.train()
     total_loss = 0.0
@@ -317,6 +328,9 @@ def train_one_epoch(
     for batch_idx, (features, labels) in enumerate(dataloader):
         features = features.to(device)
         labels = labels.to(device)
+
+        if swap_tf:
+            features = features.transpose(1, 2)
 
         if augment_fn is not None:
             features = augment_fn(features)
@@ -528,6 +542,7 @@ def write_report(
     lines.append(f"- Dropout (CNNs): {args.dropout}")
     lines.append(f"- Pool bins (CNN1D): {args.pool_bins}")
     lines.append(f"- Seeds: {args.seeds}")
+    lines.append(f"- Swap time/feature: {args.swap_tf}")
     lines.append("- Optimizer policy:")
     lines.append("  - CNNs: AdamW with weight decay 0.01 by default (unless --weight-decay overrides)")
     lines.append("  - MLPs: Adam unless --weight-decay > 0")
