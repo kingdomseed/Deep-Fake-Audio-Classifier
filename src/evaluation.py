@@ -139,7 +139,6 @@ if __name__ == "__main__":
     parser.add_argument("--in-features", type=int, default=180)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
-    parser.add_argument("--pool-bins", type=int, default=1)
     parser.add_argument("--check-uttid", action="store_true", default=True)
     parser.add_argument("--no-check-uttid", action="store_true", default=False)
     parser.add_argument("--apply-sigmoid", action="store_true", default=True)

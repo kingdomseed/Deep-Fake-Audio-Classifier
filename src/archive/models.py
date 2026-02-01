@@ -232,3 +232,67 @@ class CRNN2(nn.Module):
         last = out[:, -1, :]
         logits = self.classifier(last)
         return logits
+
+
+class CNN2D_Robust(nn.Module):
+    """
+    Archived: Robust 2D CNN with residual blocks, SE attention, and attention pooling.
+    Designed for better generalization to test distribution shift.
+
+    Input x: (B, T, F) -> add channel dim to (B, 1, T, F)
+    """
+
+    def __init__(self, in_features=180, base_channels=64, num_classes=1, dropout=0.3):
+        super().__init__()
+
+        self.block1 = self._make_block(1, base_channels, dropout)
+        self.block2 = self._make_block(base_channels, base_channels * 2, dropout)
+        self.block3 = self._make_block(base_channels * 2, base_channels * 4, dropout)
+
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(base_channels * 4, base_channels * 4 // 16, 1),
+            nn.ReLU(),
+            nn.Conv2d(base_channels * 4 // 16, base_channels * 4, 1),
+            nn.Sigmoid(),
+        )
+
+        self.attention_pool = nn.Linear(base_channels * 4, 1)
+
+        self.classifier = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(base_channels * 4, 256),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(256, num_classes),
+        )
+
+    def _make_block(self, in_c, out_c, drop):
+        return nn.Sequential(
+            nn.Conv2d(in_c, out_c, 3, padding=1),
+            nn.BatchNorm2d(out_c),
+            nn.ReLU(),
+            nn.Conv2d(out_c, out_c, 3, padding=1),
+            nn.BatchNorm2d(out_c),
+            nn.ReLU(),
+            nn.AvgPool2d((2, 1)),
+            nn.Dropout2d(drop),
+        )
+
+    def forward(self, x):
+        x = x.unsqueeze(1)
+        x = self.block1(x)
+        x = self.block2(x)
+        x = self.block3(x)
+
+        se_weight = self.se(x)
+        x = x * se_weight
+
+        x = x.mean(dim=3)
+        x = x.transpose(1, 2)
+
+        attn_weights = torch.softmax(self.attention_pool(x), dim=1)
+        x = (x * attn_weights).sum(dim=1)
+
+        logits = self.classifier(x)
+        return logits

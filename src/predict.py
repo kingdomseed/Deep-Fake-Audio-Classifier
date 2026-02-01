@@ -18,7 +18,6 @@ def parse_args():
     parser.add_argument("--device", default=None, help="cuda, mps, or cpu")
     parser.add_argument("--in-features", type=int, default=180)
     parser.add_argument("--dropout", type=float, default=0.3)
-    parser.add_argument("--pool-bins", type=int, default=1)
     parser.add_argument("--apply-sigmoid", action="store_true", default=True)
     parser.add_argument("--no-apply-sigmoid", action="store_true", default=False)
     swap_group = parser.add_mutually_exclusive_group()

@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument("--train-labels", default="data/train/labels.pkl")
     parser.add_argument("--dev-features", default="data/dev/features.pkl")
     parser.add_argument("--dev-labels", default="data/dev/labels.pkl")
-    parser.add_argument("--models", default="cnn2d,cnn2d_robust")
+    parser.add_argument("--models", default="cnn2d")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--epochs", type=int, default=10)
@@ -40,7 +40,6 @@ def parse_args():
         default=0.2,
         help="Dropout for CNN models.",
     )
-    parser.add_argument("--pool-bins", type=int, default=1)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--results-dir", default="results")
     parser.add_argument("--seeds", default="0", help="comma-separated list of seeds")
@@ -158,6 +157,8 @@ def train_one_model(
     seed: int,
     use_specaugment: bool,
 ) -> Dict:
+    if base_model != "cnn2d":
+        raise ValueError(f"Unsupported model '{base_model}'. Only 'cnn2d' is supported.")
     train_loader = make_loader(
         args.train_features,
         args.train_labels,
@@ -535,7 +536,6 @@ def write_report(
     lines.append(f"- Batch size: {args.batch_size}")
     lines.append(f"- Learning rate: {args.lr}")
     lines.append(f"- Dropout (CNNs): {args.dropout}")
-    lines.append(f"- Pool bins (CNN1D): {args.pool_bins}")
     lines.append(f"- Seeds: {args.seeds}")
     lines.append(f"- Swap time/feature: {args.swap_tf}")
     lines.append("- Optimizer policy:")

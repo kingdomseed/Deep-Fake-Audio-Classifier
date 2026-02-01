@@ -105,7 +105,6 @@ def parse_args():
     parser.add_argument("--in-features", type=int, default=180)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
-    parser.add_argument("--pool-bins", type=int, default=1, help="cnn1d pooling bins (1 = global avg)")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--no-rich", action="store_true", help="disable rich visualization (use basic tqdm instead)")
     parser.add_argument("--seed", type=int, default=0)
