@@ -17,11 +17,13 @@ class CNN2D(nn.Module):
             nn.ReLU(),
             nn.AvgPool2d(kernel_size=(2, 1)),
             nn.Dropout(dropout),
+
             nn.Conv2d(base_channels, base_channels * 2, kernel_size=3, padding=1),
             nn.BatchNorm2d(base_channels * 2),
             nn.ReLU(),
             nn.AvgPool2d(kernel_size=(2, 1)),
             nn.Dropout(dropout),
+
             nn.Conv2d(base_channels * 2, base_channels * 4, kernel_size=3, padding=1),
             nn.BatchNorm2d(base_channels * 4),
             nn.ReLU(),
