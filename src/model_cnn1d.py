@@ -18,13 +18,13 @@ class CNN1D(nn.Module):
             nn.BatchNorm1d(base_channels),
             nn.ReLU(),
             nn.Dropout(dropout),
-            
+
             # Layer 2
             nn.Conv1d(base_channels, base_channels * 2, kernel_size=3, padding=1),
             nn.BatchNorm1d(base_channels * 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            
+
             # Layer 3
             nn.Conv1d(base_channels * 2, base_channels * 4, kernel_size=3, padding=1),
             nn.BatchNorm1d(base_channels * 4),
@@ -38,7 +38,7 @@ class CNN1D(nn.Module):
         # Input x is (Batch, Time, Freq)
         # We need (Batch, Freq, Time) for Conv1d to slide across Time
         x = x.transpose(1, 2)
-        
+
         x = self.conv(x)
         x = self.pool(x)
         x = x.flatten(1)

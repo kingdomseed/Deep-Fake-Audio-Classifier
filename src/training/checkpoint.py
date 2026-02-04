@@ -24,6 +24,12 @@ def build_config_dict(args) -> Dict[str, Any]:
         "num_workers": getattr(args, "num_workers", None),
         "lr": getattr(args, "lr", None),
         "weight_decay": getattr(args, "weight_decay", None),
+        "lr_scheduler": getattr(args, "lr_scheduler", None),
+        "lr_scheduler_metric": getattr(args, "lr_scheduler_metric", None),
+        "lr_scheduler_factor": getattr(args, "lr_scheduler_factor", None),
+        "lr_scheduler_patience": getattr(args, "lr_scheduler_patience", None),
+        "lr_scheduler_threshold": getattr(args, "lr_scheduler_threshold", None),
+        "lr_scheduler_min_lr": getattr(args, "lr_scheduler_min_lr", None),
         "in_features": getattr(args, "in_features", None),
         "hidden_dim": getattr(args, "hidden_dim", None),
         "dropout": getattr(args, "dropout", None),
@@ -38,7 +44,8 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     epoch: int,
     args,
-    path: str
+    path: str,
+    scheduler: Optional[Any] = None,
 ) -> None:
     """Save model checkpoint with training state.
 
@@ -55,6 +62,8 @@ def save_checkpoint(
         "epoch": epoch,
         "config": build_config_dict(args),
     }
+    if scheduler is not None:
+        checkpoint["scheduler_state"] = scheduler.state_dict()
 
     # Ensure parent directory exists
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +75,8 @@ def load_checkpoint(
     path: str,
     model: Optional[torch.nn.Module] = None,
     optimizer: Optional[torch.optim.Optimizer] = None,
-    device: str = "cpu"
+    device: str = "cpu",
+    scheduler: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Load checkpoint from file.
 
@@ -92,5 +102,8 @@ def load_checkpoint(
 
     if optimizer is not None and "optimizer_state" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
+
+    if scheduler is not None and "scheduler_state" in checkpoint:
+        scheduler.load_state_dict(checkpoint["scheduler_state"])
 
     return checkpoint

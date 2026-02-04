@@ -102,6 +102,42 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--early-stop", type=int, default=0, help="patience in epochs (0 disables)")
+    parser.add_argument(
+        "--lr-scheduler",
+        default="none",
+        choices=["none", "plateau"],
+        help="learning-rate scheduler to use (default: none)",
+    )
+    parser.add_argument(
+        "--lr-scheduler-metric",
+        default="dev_eer",
+        choices=["dev_eer", "dev_loss"],
+        help="metric to monitor for LR scheduling (default: dev_eer)",
+    )
+    parser.add_argument(
+        "--lr-scheduler-factor",
+        type=float,
+        default=0.5,
+        help="ReduceLROnPlateau factor (default: 0.5)",
+    )
+    parser.add_argument(
+        "--lr-scheduler-patience",
+        type=int,
+        default=2,
+        help="ReduceLROnPlateau patience in epochs (default: 2)",
+    )
+    parser.add_argument(
+        "--lr-scheduler-threshold",
+        type=float,
+        default=1e-4,
+        help="ReduceLROnPlateau threshold (default: 1e-4)",
+    )
+    parser.add_argument(
+        "--lr-scheduler-min-lr",
+        type=float,
+        default=1e-6,
+        help="ReduceLROnPlateau minimum LR (default: 1e-6)",
+    )
     parser.add_argument("--device", default=None, help="cuda, mps, or cpu")
     parser.add_argument("--in-features", type=int, default=180)
     parser.add_argument("--hidden-dim", type=int, default=128)
@@ -198,6 +234,17 @@ def main():
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+    scheduler = None
+    if args.lr_scheduler == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=args.lr_scheduler_factor,
+            patience=args.lr_scheduler_patience,
+            threshold=args.lr_scheduler_threshold,
+            min_lr=args.lr_scheduler_min_lr,
+        )
+
     # Setup augmentation if enabled
     augment_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None
     if args.spec_augment:
@@ -242,6 +289,8 @@ def main():
 
     # Training loop
     best_eer = None
+    best_train_loss = None
+    best_dev_loss = None
     prev_metrics = None
     epochs_no_improve = 0
     history = []
@@ -269,15 +318,48 @@ def main():
             swap_tf=args.swap_tf,
         )
 
-        # Determine if this is the best EER
+        # Determine if this should become the new "best" checkpoint.
+        #
+        # Primary criterion: dev EER decreases.
+        # Tie-breaker (edge case): dev EER is effectively unchanged, but both
+        # train loss AND dev loss decrease vs the previous best checkpoint.
+        #
+        # Note: early stopping remains based on EER improvement only.
         is_best = False
-        if dev_metrics_dict["eer"] is not None:
-            if best_eer is None or dev_metrics_dict["eer"] < best_eer:
+        eer = dev_metrics_dict["eer"]
+        dev_loss = dev_metrics_dict["avg_loss"]
+        eer_tie_eps = 1e-4  # matches 4-decimal printing; treat smaller diffs as "no change"
+        loss_improve_eps = 1e-6
+
+        if eer is not None:
+            if best_eer is None or eer < best_eer:
                 is_best = True
-                best_eer = dev_metrics_dict["eer"]
+                best_eer = eer
+                best_train_loss = train_loss
+                best_dev_loss = dev_loss
                 epochs_no_improve = 0
             else:
                 epochs_no_improve += 1
+                if (
+                    best_eer is not None
+                    and abs(eer - best_eer) <= eer_tie_eps
+                    and train_loss is not None
+                    and dev_loss is not None
+                    and best_train_loss is not None
+                    and best_dev_loss is not None
+                    and train_loss < best_train_loss - loss_improve_eps
+                    and dev_loss < best_dev_loss - loss_improve_eps
+                ):
+                    is_best = True
+                    best_train_loss = train_loss
+                    best_dev_loss = dev_loss
+
+        if scheduler is not None:
+            scheduler_metric = (
+                dev_loss if args.lr_scheduler_metric == "dev_loss" else eer
+            )
+            if scheduler_metric is not None:
+                scheduler.step(scheduler_metric)
 
         # Build epoch metrics
         improved = (
@@ -289,8 +371,8 @@ def main():
         metrics = EpochMetrics(
             epoch=epoch,
             train_loss=train_loss,
-            dev_loss=dev_metrics_dict["avg_loss"],
-            dev_eer=dev_metrics_dict["eer"],
+            dev_loss=dev_loss,
+            dev_eer=eer,
             is_best=is_best,
             improved=improved,
             epochs_no_improve=epochs_no_improve
@@ -301,7 +383,7 @@ def main():
 
         # Save checkpoint if this is the best model
         if is_best:
-            save_checkpoint(model, optimizer, epoch, args, best_path)
+            save_checkpoint(model, optimizer, epoch, args, best_path, scheduler=scheduler)
 
         # Update history and prev_metrics
         history.append(metrics)
@@ -320,7 +402,7 @@ def main():
 
     # Save final checkpoint at the last completed epoch
     last_epoch = history[-1].epoch if history else 0
-    save_checkpoint(model, optimizer, last_epoch, args, last_path)
+    save_checkpoint(model, optimizer, last_epoch, args, last_path, scheduler=scheduler)
 
 
 if __name__ == "__main__":
