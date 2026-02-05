@@ -6,6 +6,7 @@ import pandas as pd
 
 from dataloaders import make_loader
 from model import CNN2D
+from model_cnn1d import CNN1D
 
 
 def calculate_eer(scores, labels):
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         default="cnn2d",
-        choices=["cnn2d"],
+        choices=["cnn2d", "cnn1d"],
     )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
@@ -187,7 +188,10 @@ if __name__ == "__main__":
     else:
         apply_sigmoid = args.apply_sigmoid
 
-    model = CNN2D(**model_kwargs).to(device)
+    if args.model == "cnn1d":
+        model = CNN1D(**model_kwargs).to(device)
+    else:
+        model = CNN2D(**model_kwargs).to(device)
 
     ckpt = torch.load(args.checkpoint, map_location=device)
     if isinstance(ckpt, dict) and "model_state" in ckpt:

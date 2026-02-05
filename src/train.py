@@ -7,7 +7,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from augmentation import spec_augment
+from augmentation import (
+    channel_drop,
+    compose,
+    gaussian_jitter,
+    spec_augment,
+    time_shift,
+)
 from dataloaders import make_loader
 from evaluation import evaluate
 from model import CNN2D
@@ -145,10 +151,79 @@ def parse_args():
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--no-rich", action="store_true", help="disable rich visualization (use basic tqdm instead)")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--spec-augment", action="store_true", help="enable SpecAugment data augmentation during training")
-    parser.add_argument("--time-mask-ratio", type=float, default=0.2, help="max ratio of time steps to mask (default: 0.2)")
-    parser.add_argument("--feature-mask-ratio", type=float, default=0.1, help="max ratio of features to mask (default: 0.1)")
-    parser.add_argument("--feature-mask", action="store_true", help="enable feature masking in addition to time masking")
+    parser.add_argument(
+        "--spec-augment",
+        action="store_true",
+        help="enable SpecAugment data augmentation during training",
+    )
+    parser.add_argument(
+        "--time-mask-ratio",
+        type=float,
+        default=0.2,
+        help="max ratio of time steps to mask (default: 0.2)",
+    )
+    parser.add_argument(
+        "--feature-mask-ratio",
+        type=float,
+        default=0.1,
+        help="max ratio of features to mask (default: 0.1)",
+    )
+    parser.add_argument(
+        "--feature-mask",
+        action="store_true",
+        help="enable feature masking in addition to time masking",
+    )
+
+    # Additional robustness augmentations (training only)
+    parser.add_argument(
+        "--time-shift",
+        action="store_true",
+        help="enable random circular time shift on features during training",
+    )
+    parser.add_argument(
+        "--time-shift-ratio",
+        type=float,
+        default=0.1,
+        help="max time shift as ratio of T (default: 0.1)",
+    )
+    parser.add_argument(
+        "--channel-drop",
+        action="store_true",
+        help="enable random channel/feature drop during training",
+    )
+    parser.add_argument(
+        "--channel-drop-prob",
+        type=float,
+        default=0.1,
+        help="drop prob per feature dim (default: 0.1)",
+    )
+    parser.add_argument(
+        "--gaussian-jitter",
+        action="store_true",
+        help="enable small Gaussian feature noise during training",
+    )
+    parser.add_argument(
+        "--gaussian-jitter-std",
+        type=float,
+        default=0.01,
+        help="stddev of Gaussian feature noise (default: 0.01)",
+    )
+
+    # Calibration
+    parser.add_argument(
+        "--label-smoothing",
+        type=float,
+        default=0.0,
+        help="label smoothing epsilon in [0, 0.5) (default: 0.0)",
+    )
+
+    parser.add_argument(
+        "--debug-augment-stats",
+        action="store_true",
+        help=(
+            "print feature stats before/after augmentation on the first batch"
+        ),
+    )
     swap_group = parser.add_mutually_exclusive_group()
     swap_group.add_argument(
         "--swap-tf",
@@ -222,7 +297,19 @@ def main():
     model.to(device)
 
     # Loss + optimizer (BCEWithLogitsLoss expects raw logits)
-    criterion = nn.BCEWithLogitsLoss()
+    if not (0.0 <= args.label_smoothing < 0.5):
+        raise ValueError("--label-smoothing must be in [0, 0.5)")
+
+    def _maybe_smooth_labels(y: torch.Tensor) -> torch.Tensor:
+        if args.label_smoothing <= 0:
+            return y
+        eps = float(args.label_smoothing)
+        return y * (1.0 - eps) + 0.5 * eps
+
+    bce = nn.BCEWithLogitsLoss()
+
+    def criterion(logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return bce(logits, _maybe_smooth_labels(y))
     use_adamw = args.model.startswith("cnn")
     weight_decay = args.weight_decay
     if use_adamw and weight_decay == 0.0:
@@ -246,9 +333,9 @@ def main():
         )
 
     # Setup augmentation if enabled
-    augment_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None
+    augment_fns: list[Callable[[torch.Tensor], torch.Tensor]] = []
     if args.spec_augment:
-        def _augment_fn(features: torch.Tensor) -> torch.Tensor:
+        def _specaug_fn(features: torch.Tensor) -> torch.Tensor:
             return spec_augment(
                 features,
                 time_mask_ratio=args.time_mask_ratio,
@@ -257,14 +344,82 @@ def main():
                 apply_feature_mask=args.feature_mask,
             )
 
-        augment_fn = _augment_fn
+        augment_fns.append(_specaug_fn)
         feature_mask_status = (
-            f"{args.feature_mask_ratio:.2f}" if args.feature_mask else "disabled"
+            f"{args.feature_mask_ratio:.2f}"
+            if args.feature_mask
+            else "disabled"
         )
         print(
             f"SpecAugment enabled: time_mask={args.time_mask_ratio:.2f}, "
             f"feature_mask={feature_mask_status}"
         )
+
+    if args.time_shift:
+        augment_fns.append(
+            lambda x: time_shift(x, max_shift_ratio=args.time_shift_ratio)
+        )
+        print(
+            f"Time shift enabled: max_shift_ratio={args.time_shift_ratio:.2f}"
+        )
+
+    if args.channel_drop:
+        augment_fns.append(
+            lambda x: channel_drop(x, drop_prob=args.channel_drop_prob)
+        )
+        print(f"Channel drop enabled: p={args.channel_drop_prob:.2f}")
+
+    if args.gaussian_jitter:
+        augment_fns.append(
+            lambda x: gaussian_jitter(x, std=args.gaussian_jitter_std)
+        )
+        print(f"Gaussian jitter enabled: std={args.gaussian_jitter_std:.4f}")
+
+    augment_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = (
+        compose(*augment_fns) if augment_fns else None
+    )
+
+    if args.debug_augment_stats:
+        def _stats(x: torch.Tensor) -> str:
+            x_detached = x.detach()
+            flat = x_detached.flatten()
+            zeros = (flat == 0).float().mean().item()
+            q01, q50, q99 = torch.quantile(
+                flat,
+                torch.tensor([0.01, 0.50, 0.99], device=flat.device),
+            ).tolist()
+            return (
+                f"shape={tuple(x_detached.shape)} "
+                f"min={x_detached.min().item():.4f} "
+                f"q01={q01:.4f} "
+                f"median={q50:.4f} "
+                f"q99={q99:.4f} "
+                f"max={x_detached.max().item():.4f} "
+                f"mean={x_detached.mean().item():.4f} "
+                f"std={x_detached.std().item():.4f} "
+                f"zero%={zeros * 100:.4f}"
+            )
+
+        base_augment_fn = augment_fn
+
+        printed = {"done": False}
+
+        def _debug_augment_fn(features: torch.Tensor) -> torch.Tensor:
+            # Note: by the time this hook runs, features are already in the
+            # model-view orientation (swap_tf applied earlier in train loop).
+            if not printed["done"]:
+                print("[augment-stats] before:", _stats(features))
+            out = (
+                base_augment_fn(features)
+                if base_augment_fn is not None
+                else features
+            )
+            if not printed["done"]:
+                print("[augment-stats] after: ", _stats(out))
+                printed["done"] = True
+            return out
+
+        augment_fn = _debug_augment_fn
 
     # Create visualizer (Rich by default, tqdm if --no-rich)
     visualizer_type = "tqdm" if args.no_rich else "rich"

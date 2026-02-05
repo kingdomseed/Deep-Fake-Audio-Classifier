@@ -2,6 +2,84 @@ import random
 import torch
 
 
+def time_shift(
+    features: torch.Tensor, max_shift_ratio: float = 0.1
+) -> torch.Tensor:
+    """Randomly circular-shift along the time dimension.
+
+    Args:
+        features: [B, T, F] tensor
+        max_shift_ratio: max absolute shift as a ratio of T (default 0.1)
+
+    Returns:
+        Shifted features (same shape)
+    """
+    if max_shift_ratio <= 0:
+        return features
+
+    B, T, F = features.shape
+    if T <= 1:
+        return features
+
+    max_shift = int(T * max_shift_ratio)
+    if max_shift < 1:
+        return features
+
+    shift = random.randint(-max_shift, max_shift)
+    if shift == 0:
+        return features
+    return torch.roll(features, shifts=shift, dims=1)
+
+
+def channel_drop(
+    features: torch.Tensor, drop_prob: float = 0.1
+) -> torch.Tensor:
+    """Randomly zero-out feature channels (a.k.a. input channel dropout).
+
+    Args:
+        features: [B, T, F] tensor
+        drop_prob: probability of dropping each feature dim (default 0.1)
+
+    Returns:
+        Features with some channels zeroed (same shape)
+    """
+    if drop_prob <= 0:
+        return features
+
+    B, T, F = features.shape
+    # mask shape [1, 1, F] broadcast across batch/time
+    keep = (
+        torch.rand((1, 1, F), device=features.device) >= drop_prob
+    ).to(features.dtype)
+    return features * keep
+
+
+def gaussian_jitter(features: torch.Tensor, std: float = 0.01) -> torch.Tensor:
+    """Add small Gaussian noise in feature space.
+
+    Args:
+        features: [B, T, F] tensor
+        std: noise stddev (default 0.01)
+
+    Returns:
+        Noisy features (same shape)
+    """
+    if std <= 0:
+        return features
+    noise = torch.randn_like(features) * std
+    return features + noise
+
+
+def compose(*fns):
+    def _apply(x: torch.Tensor) -> torch.Tensor:
+        for fn in fns:
+            if fn is not None:
+                x = fn(x)
+        return x
+
+    return _apply
+
+
 def time_mask(features, max_mask_ratio=0.2, min_mask_ratio=0.05):
     """
     SpecAugment time masking: randomly zero out a contiguous segment of time steps.
