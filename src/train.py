@@ -33,7 +33,7 @@ def train_one_epoch(
     dataloader,
     criterion,
     optimizer,
-    device: str = "cpu",
+    device: str = "mps",
     batch_context: BatchContext | None = None,
     augment_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     swap_tf: bool = False,
