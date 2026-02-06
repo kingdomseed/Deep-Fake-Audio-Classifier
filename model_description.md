@@ -1,28 +1,23 @@
-# Model Description
+# Model Description - Jason Holt
 
 # Data
-
-src/augmentation.py
-Includes: 
-- time and feature masks - blacked out chunks of time (20%) and blacked out 10% random ranges of frequencies.
-- time shift - shifted audio cyclically so patterns that only appear at the beginning or end are not over emphasized in those positions.
-- channel_drop - Randomly zero out specific feature Chanels to make the model more robust against missing data.
-- gaussian jitter -  Added a tiny bit of random white noise in case the audio was too clean.
+This project uses several data augmentation techniques from `src/augmentation.py` to make the model more robust:
+- **SpecAugment (Time & Feature Masks):** I black out random chunks of time (20%) and frequency ranges (10%). This forces the model to learn the overall "vibe" of the voice rather than just looking for specific small glitches (local artifacts).
+- **Circular Time Shift:** I shift the audio starting point so the model doesn't over-memorize patterns that only happen at the very beginning or end.
+- **Channel Drop:** I randomly zero out some feature channels to help the model stay accurate even if some data is missing or messy.
+- **Gaussian Jitter:** I add a tiny bit of random noise to the audio so the model doesn't get "spoiled" by training data that is too clean.
 
 # Model
-
-src/model.py
-2D CNN
-- A stacked architecture consisting of three convolutional blocks using hierarchy starting from simple to complex (32 channels, 64 channels, and then 128 channels).
-- A stack: Conv2d, BatchNom2d, ReLU, AvgPool2d, Dropout
-	- Average pooling is applied to the temporal dimension.
-- Final stack: Conv2d, BatchNorm2d, ReLU
-- A final Linear Layer for classification
+The model in `src/model.py` is a **2D CNN** (first recommended by a classmate because the data set is a matrix) designed to find patterns in the time-frequency grid of the audio. The channel of the CNN is I believe like a greyscale image and therefore turns the audio into more of a spectrogram and analyzes it as an image. I added padding and the kernel size is 3. 
+- **Hierarchy:** It uses three "convolutional blocks" that get more complex as they go (starting with 32 focus points, then 64, then 128). This helps the model learn simple sounds first and then more complex speech patterns later.
+- **Blocks:** Each block uses Convolution, Batch Normalization (for stability), ReLU (to learn patterns), and Average Pooling. 
+- **Time Focus:** I apply pooling specifically to the time dimension. This shrinks the timeline but keeps the frequency details sharp, which is important for spotting deepfakes.
 
 # Loss
-
-Binary Cross Entropy (BCE) loss with Label Smoothing at 0.05 to try and help the model not be overconfident by telling it that not every sample is 100% real or 100% fake.
+I used **Binary Cross Entropy (BCE)** loss with **Label Smoothing (0.05)**. 
+- Instead of telling the model that every sample is "100% Real" or "100% Fake," I "soften" the targets. This prevents the model from becoming over-confident, and possibly better at handling new data.
 
 # Others
-
-Optimization: AdamW with a learning rate scheduler, early stopping after 8 epochs (50 was the target), and checked the score distribution (thanks to Pengcheng) to ensure we had some variation in the learning. 
+- **Optimization:** I used the AdamW optimizer with a learning rate scheduler that lowers the learning rate if the model stops improving.
+- **Early Stopping:** Training was stopped after 8 epochs of no improvement to ensure the model didn't start "memorizing” training data.
+- **Verification:** This final model achieved **0.00 EER on Test 1** while maintaining a safe, spread-out score distribution. Whether this stands up to the more challenging data remains to be seen.
