@@ -149,6 +149,11 @@ def parse_args():
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument(
+        "--run-name",
+        default="",
+        help="Optional subfolder name under --checkpoint-dir for outputs (e.g. 20260206_cnn2d_mix).",
+    )
     parser.add_argument("--no-rich", action="store_true", help="disable rich visualization (use basic tqdm instead)")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -264,9 +269,12 @@ def main():
     else:
         device = args.device
 
-    os.makedirs(args.checkpoint_dir, exist_ok=True)
-    best_path = os.path.join(args.checkpoint_dir, f"{args.model}_best.pt")
-    last_path = os.path.join(args.checkpoint_dir, f"{args.model}_last.pt")
+    checkpoint_root = args.checkpoint_dir
+    if args.run_name:
+        checkpoint_root = os.path.join(checkpoint_root, args.run_name)
+    os.makedirs(checkpoint_root, exist_ok=True)
+    best_path = os.path.join(checkpoint_root, f"{args.model}_best.pt")
+    last_path = os.path.join(checkpoint_root, f"{args.model}_last.pt")
 
     train_loader = make_loader(
         args.train_features,

@@ -39,6 +39,23 @@ def calculate_eer(scores, labels):
     return float(eer), float(threshold)
 
 
+def confusion_at_threshold(scores, labels, threshold):
+    scores_np = np.array(scores)
+    labels_np = np.array(labels).astype(int)
+
+    pred = (scores_np > threshold).astype(int)
+
+    tp = int(np.sum((pred == 1) & (labels_np == 1)))
+    fn = int(np.sum((pred == 0) & (labels_np == 1)))
+    fp = int(np.sum((pred == 1) & (labels_np == 0)))
+    tn = int(np.sum((pred == 0) & (labels_np == 0)))
+
+    far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    frr = fn / (tp + fn) if (tp + fn) > 0 else 0.0
+
+    return tp, fp, tn, fn, float(far), float(frr)
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         raise ValueError("Usage: python evaluation.py <prediction.pkl> <labels.pkl>")
@@ -65,5 +82,9 @@ if __name__ == "__main__":
 
     eer, threshold = calculate_eer(scores, labels)
 
+    tp, fp, tn, fn, far, frr = confusion_at_threshold(scores, labels, threshold)
+
     print(f"EER: {eer:.6f}")
     print(f"Threshold: {threshold:.6f}")
+    print(f"TP: {tp}  FP: {fp}  TN: {tn}  FN: {fn}")
+    print(f"FAR: {far:.6f}  FRR: {frr:.6f}")
