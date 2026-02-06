@@ -1,6 +1,6 @@
 import pandas as pd
 
-predict = pd.read_pickle("st199007-Jason-Holt-WhatAreLogits-old.pkl")
+predict = pd.read_pickle("st199007-Jason-Holt-WhatAreLogits.pkl")
 
 class1 = 0
 class0 = 0
