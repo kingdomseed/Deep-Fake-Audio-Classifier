@@ -1,0 +1,21 @@
+/Users/jholt/development/CL_Python/semester_1_dl_project/src/dataset_cae.py:49: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  data = torch.load(path, map_location="cpu")
+/Users/jholt/development/CL_Python/semester_1_dl_project/src/evaluation_cae.py:112: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(args.checkpoint, map_location=device)
+
+Loaded normalizer from checkpoints/cae_v5_fullconv/normalizer.pt
+Loaded checkpoint from checkpoints/cae_v7_slower_decay/cae_best.pt
+Evaluating on 2000 samples...
+
+============================================================
+CAE Anomaly Detection Results
+  Avg MSE (all):      0.277789
+  Avg MSE (bonafide): 0.372650
+  Avg MSE (spoof):    0.195671
+  MSE ratio (spoof/bonafide): 0.53x
+  EER (-MSE):         0.929997
+  EER (+MSE):         0.070003
+  Best EER:           0.070003  (inverted (+MSE: fakes have lower error))
+  Threshold (MSE):    0.258179
+============================================================
+

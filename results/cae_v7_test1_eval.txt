@@ -1,0 +1,10 @@
+CAE v7 (300ep, scheduler patience=7) - Test1 Evaluation
+Best checkpoint: epoch 296, val_mse=0.372650
+
+Test1 (500 samples, 219 bonafide, 281 spoof)
+  EER (-MSE): 0.904012
+  EER (+MSE): 0.095988
+  Best EER:   0.095988  (+MSE)
+  Bonafide avg MSE: 0.365129
+  Spoof    avg MSE: 0.191441
+  Ratio (spoof/bonafide): 0.524x
