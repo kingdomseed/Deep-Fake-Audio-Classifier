@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for any research and development or programming task.
+
 ## Project Structure & Module Organization
 - `src/`: Core training, models, dataloaders, evaluation, and visualizers (e.g., `src/train.py`, `src/model.py`, `src/visualizers/`).
 - `scripts/`: Standalone utilities for scoring and submission (`scripts/evaluation.py`, `scripts/generate_submission.py`).

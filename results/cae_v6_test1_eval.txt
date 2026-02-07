@@ -1,0 +1,10 @@
+CAE v6 (200ep) - Test1 Evaluation
+Best checkpoint: epoch 199, val_mse=0.403369
+
+Test1 (500 samples, 219 bonafide, 281 spoof)
+  EER (-MSE): 0.904012
+  EER (+MSE): 0.095988
+  Best EER:   0.095988  (+MSE)
+  Bonafide avg MSE: 0.395222
+  Spoof    avg MSE: 0.207143
+  Ratio (spoof/bonafide): 0.524x

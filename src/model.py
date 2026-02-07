@@ -30,13 +30,15 @@ class CNN2D(nn.Module):
         )
         self.classifier = nn.Linear(base_channels * 4 * in_features, num_classes)
 
-    def forward(self, x):
+    def forward(self, x, return_embedding=False):
         x = x.unsqueeze(1)
         x = self.conv(x)
         # Preserve feature (frequency) detail; average over time only.
         x = x.mean(dim=2)
-        x = x.flatten(1)
-        logits = self.classifier(x)
+        embedding = x.flatten(1)
+        logits = self.classifier(embedding)
+        if return_embedding:
+            return logits, embedding
         return logits
 
 
