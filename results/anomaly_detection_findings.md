@@ -52,15 +52,15 @@ Better reconstruction (lower MSE) doesn't improve discrimination. The model gets
 
 v6's scheduler (patience=3) decayed the LR to 1e-6 by epoch ~160, freezing the model early. v7 used patience=7, which kept the LR at 2.5e-5 through epoch 170+ and only hit 6.25e-6 at epoch 292. Despite reaching a significantly lower val MSE (0.373 vs 0.403), the EER was identical. The gentler schedule produced better reconstruction but no better discrimination — confirming that the CAE's limitation is structural, not a training issue.
 
-### 5. On tiny datasets, simpler models win
+### 4. On tiny datasets, simpler models win
 
 Archived models (MeanPoolMLP, StatsPoolMLP, CRNN, CRNN2, CNN2D_Robust with SE attention) all performed worse than the simple 3-block CNN2D. The MLPs destroyed temporal locality by mean-pooling over time. The CRNNs and attention models overfitted — more parameters + 6,400 training samples = memorization. The CNN1D wasn't submitted because its score distribution was too extreme (overconfident), making it fragile under distribution shift. Label smoothing + calibrated scores > raw accuracy.
 
-### 6. Semi-supervised "hacking" requires independent signals
+### 5. Semi-supervised "hacking" requires independent signals
 
 Using the OC-SVM or CAE as pseudo-label generators for fine-tuning is largely circular when they're derived from the same base model's embeddings. The professor's voting approach requires genuinely different architectures from different people. A single student's models share too much underlying representation for the votes to be independent.
 
-### 4. The professor's "hacking" is semi-supervised, not unsupervised
+### 6. The professor's "hacking" is semi-supervised, not unsupervised
 
 From the Jan 27 lecture: the professor described using unsupervised methods to **infer pseudo-labels** on the test set, then using cross-model voting to refine them. This is different from building a standalone anomaly detector. The pipeline is:
 
@@ -72,8 +72,12 @@ From the Jan 27 lecture: the professor described using unsupervised methods to *
 
 - **Why bottlenecks matter:** A single linear layer compressing 112K -> 512 creates an information cliff where gradients can't propagate. Distributed spatial compression through conv layers works.
 - **Feature normalization is critical:** LFCC features span [-50, +10]. Without z-score normalization, MSE is dominated by high-magnitude features.
+- **The data is LFCC, not spectrograms:** Features are [60 LFCC + 60 delta + 60 delta-delta] cepstral coefficients, not raw spectrograms. The 2D CNN "image analogy" works structurally but the value semantics are different.
 - **Anomaly detection assumptions can invert:** When the "anomaly" (deepfakes) is simpler than normal (real speech), reconstruction error goes the wrong way.
 - **Reconstruction quality != discrimination quality:** More epochs improve MSE but don't improve the gap between classes.
+- **Score calibration matters more than raw accuracy:** The CNN1D had similar or better accuracy but was rejected for submission because its score distribution was too extreme. Overconfident models are fragile under distribution shift. Label smoothing (0.05) was key to the submitted model's robustness.
+- **The OC-SVM is already a pseudo-label generator:** At 4.55% EER, `ocsvm.predict()` returns +1/-1 labels that are ~95.5% accurate. But fine-tuning on those pseudo-labels is circular when they come from the same base model's embeddings.
+- **Semi-supervised requires collaboration:** The professor explicitly blessed unsupervised "hacking" but emphasized that the voting approach requires genuinely different models from different people. A single student's models share too much representation for independent votes.
 
 ## Open Questions
 
@@ -81,6 +85,26 @@ From the Jan 27 lecture: the professor described using unsupervised methods to *
 2. Would a **VAE** with KL regularization force the latent space to be more structured, preventing the model from learning a "reconstruct anything" representation?
 3. The professor's semi-supervised voting approach: with our supervised model's scores + CAE's anomaly scores + classmate's k-means clusters, could we triangulate pseudo-labels on the final test set?
 4. Is the CAE's inverted polarity actually more robust on truly unseen attacks? We can't answer this without harder test labels.
+
+## Archived Models (from `src/archive/models.py`)
+
+| Model | Why It Failed |
+|---|---|
+| MeanPoolMLP | Destroyed temporal locality — mean over time buries localized artifacts |
+| StatsPoolMLP | Same problem but with mean+std+max; still no local structure |
+| CNN1DSpatial | `in_channels=321` (time dim) — convolved over wrong axis |
+| CRNN (1-layer GRU) | Overfitted — RNN parameters + tiny dataset = memorization |
+| CRNN2 (2-layer GRU) | Same overfitting, worse with more RNN layers |
+| CNN2D_Robust (SE attention, double conv) | Too many parameters (~5-10x CNN2D); overfitted on 6,400 samples |
+| CNN1D (final, not archived) | Worked well but rejected for submission — score distribution too extreme/overconfident |
+
+## Conclusion
+
+The supervised CNN2D with label smoothing and augmentation remains the best single model for this task. The unsupervised exploration (CAE, OC-SVM, ensemble) provided valuable learning about anomaly detection, feature spaces, and model calibration, but did not produce a model worth substituting for the submission.
+
+The fundamental constraint is the tiny dataset (6,400 train, 2,000 dev). On this scale, simple architectures with good regularization beat complex ones, and a single well-tuned supervised model leaves little room for unsupervised methods to improve upon — especially when the "anomaly" (deepfakes) is structurally simpler than the normal class (real speech).
+
+The path to actual improvement would require either (a) genuinely different model architectures from collaborators for voting-based semi-supervised learning, or (b) a fundamentally different loss function (e.g., contrastive, perceptual) that captures higher-level "naturalness" rather than pixel-level reconstruction.
 
 ## Files Created
 

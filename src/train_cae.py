@@ -177,6 +177,7 @@ def main():
     if args.normalizer_path and os.path.exists(args.normalizer_path):
         from dataset_cae import FeatureNormalizer
         normalizer = FeatureNormalizer.load(args.normalizer_path)
+        norm_path = args.normalizer_path
     else:
         normalizer = build_normalizer(args.train_features, args.train_labels)
         normalizer.save(norm_path)
