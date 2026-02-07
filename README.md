@@ -171,6 +171,50 @@ This `scripts/generate_submission.py` script generates a file named `<student_id
 
 Upload the generated `.pkl` file to **ILIAS**. Starting from Jan 29, the leaderboard will be updated daily by us. Only nicknames will be displayed publicly to maintain privacy; student IDs are used solely for verification.
 
+### 3.5 How to Test Your Submission (IMS phoenix)
+
+You need an IMS account. If you do not have one, ask a colleague for help.
+
+Steps:
+
+1. Login to the IMS `phoenix` server (it must be `phoenix`, other servers will not work).
+
+Example login command:
+
+```bash
+ssh <ims_username>@phoenix.ims.uni-stuttgart.de
+```
+2. Upload your submission file to the IMS server (copy to your home folder).
+
+Example copy command (run on your local machine):
+
+```bash
+scp "/path/to/your_submission_file.pkl" <ims_username>@phoenix.ims.uni-stuttgart.de:~/
+```
+
+
+
+Verify the file on the server:
+
+```bash
+ls -l ~/your_submission_file.pkl
+```
+3. In the terminal, run the submission check:
+
+```bash
+curl -X POST http://localhost:4242/submit -F "file=@<your_submission_file>"
+```
+
+Example:
+
+```bash
+xiaoyn@phoenix ~/intro2dl $ curl -X POST http://localhost:4242/submit -F "file=@st123456_Yixuan_Xiao_correct.pkl"
+{"error":null,"status":"valid"}
+xiaoyn@phoenix ~/intro2dl $ curl -X POST http://localhost:4242/submit -F "file=@st123456_YixuanXiao_wrong.pkl"
+{"error":"failed to load the pkl file, likely library version mismatch, please check https://github.tik.uni-stuttgart.de/yixuan/Intro2DL-Project/tree/main/environment_setup_guide","status":"invalid"}
+xiaoyn@phoenix ~/intro2dl $
+```
+
 ## 4. Example Code
 
 [demo.py](examples/demo.py) showcases how to structure your code for this task.
