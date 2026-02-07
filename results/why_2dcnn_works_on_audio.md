@@ -13,6 +13,7 @@ Imagine your audio data as a spreadsheet with 321 rows and 180 columns.
 A 2D CNN slides a small window (3x3) across this spreadsheet, looking for patterns. It doesn't know or care that this came from audio. It just asks: **"Is there a local pattern here that matters?"**
 
 The answer is yes, because:
+
 - **Neighboring rows are related.** Time frame 100 sounds almost the same as frame 101 — speech changes smoothly. A deepfake glitch at frame 100 probably also shows up at frame 101.
 - **Neighboring columns are related.** LFCC coefficient 30 (one frequency band) is correlated with coefficient 31 (the adjacent band). A deepfake artifact that affects one frequency band tends to bleed into neighboring bands too.
 
@@ -36,6 +37,7 @@ The principle is the same: **local features combine into larger, more abstract f
 In a real photograph, the two axes (height and width) mean the same thing — they're both spatial distance. A cat is still a cat whether it's in the top-left or bottom-right. You can pool both axes equally.
 
 In your audio data, the axes mean fundamentally different things:
+
 - **Axis 0 (rows): Time.** Frame 100 and frame 200 might contain completely different sounds.
 - **Axis 1 (columns): Feature type.** Column 30 is always the same LFCC coefficient. Column 90 is always the same delta coefficient.
 
@@ -49,6 +51,7 @@ AvgPool2d(kernel_size=(2, 1))
 ```
 
 After three of these pool layers:
+
 - Time: 321 → 160 → 80 → 40 (compressed 8x — fine, because adjacent frames are nearly identical)
 - Features: 180 → 180 → 180 → 180 (untouched — because averaging an LFCC with a delta is meaningless)
 
