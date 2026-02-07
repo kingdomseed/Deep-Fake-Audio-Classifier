@@ -106,6 +106,56 @@ The fundamental constraint is the tiny dataset (6,400 train, 2,000 dev). On this
 
 The path to actual improvement would require either (a) genuinely different model architectures from collaborators for voting-based semi-supervised learning, or (b) a fundamentally different loss function (e.g., contrastive, perceptual) that captures higher-level "naturalness" rather than pixel-level reconstruction.
 
+## Post-Exploration: Cross-Model Voting Analysis (Feb 7)
+
+### Classmate ensemble data
+
+Received 6 prediction files from a classmate — all 2DCNN variants with different preprocessing on the final test set:
+
+| File | Method | Est Real | Est Fake |
+|---|---|---|---|
+| prediction_0 | Baseline (no special method) | 387 | 613 |
+| prediction_1 | CVMN (cepstral variance normalization) | 372 | 628 |
+| prediction_2 | CMN (cepstral mean normalization) | 400 | 600 |
+| prediction_3 | Std dev deleted in forward pass | 384 | 616 |
+| prediction_4 | Std dev dropped out by chance | 377 | 623 |
+| prediction_5 | (unlabeled 6th variant) | 375 | 625 |
+
+### Voting results (7 models: ours + 6 classmate)
+
+- **92.6% unanimous** (926/1000): 359 all-say-real + 567 all-say-fake
+- **74 split-vote samples**: only these are contested
+- Our model agrees with majority on **96.0%** of samples
+- **37 samples**: we say real, classmate majority says fake
+- **3 samples**: we say fake, classmate majority says real
+- Our model is the **most generous with "real" labels** (418 vs group average ~383)
+- Classmate models agree with each other at 97-99.5%; with us at 94-96%
+
+### CAE caught the same signal (partially)
+
+The hybrid ensemble (alpha=0.80, 20% CAE) flipped 12 samples from real to fake. **All 12 were a perfect subset of the 37 classmate-disputed samples.** Zero false positives — the CAE independently flagged the same suspicious samples, but only the most borderline ones (our scores 0.50-0.55). It missed the 25 where our model was more confident (0.56-0.95).
+
+### Professor's MTS analysis changes the interpretation
+
+From the Feb 6 announcement, the professor revealed the MTS (final test set) results:
+- **Mean EER: 10.37%, Median: 9.33%, range: 6-18%** across 21 valid submissions
+- Half the deepfakes are unseen attacks, half are seen attacks
+- **All models handle new deepfakes well** — confident low scores
+- **Most models fail on new bonafide audio** — classifying calm real speech as fake
+- Prosody richness ranking: **old bonafide (vivid) > new bonafide (calm/flat) > deepfakes (smoothest)**
+- Models with EER >10% show overfitting: overly confident with large score gaps
+
+### Why we did NOT modify the submission
+
+The 37 disputed samples (we say real, classmates say fake) might include new calm bonafide that all models systematically misclassify. The professor explicitly stated the dominant error mode is **false rejection of calm bonafide**, not false acceptance of deepfakes.
+
+The classmate voting consensus is biased by the same systematic error — 6 models trained on vivid bonafide all see calm bonafide as suspiciously smooth. Our model's more generous "real" calls may be partially correct on exactly these samples, thanks to:
+- Label smoothing (0.05) preventing overconfidence
+- Time masking and time shift augmentation reducing prosody dependence
+- Calibrated score distribution (not extreme/overconfident)
+
+Overriding our scores with group consensus could make things **worse** by amplifying the shared bias rather than correcting it. Decision: **keep original submission unchanged.**
+
 ## Files Created
 
 | File | Purpose |
