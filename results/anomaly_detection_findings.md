@@ -79,12 +79,27 @@ From the Jan 27 lecture: the professor described using unsupervised methods to *
 - **The OC-SVM is already a pseudo-label generator:** At 4.55% EER, `ocsvm.predict()` returns +1/-1 labels that are ~95.5% accurate. But fine-tuning on those pseudo-labels is circular when they come from the same base model's embeddings.
 - **Semi-supervised requires collaboration:** The professor explicitly blessed unsupervised "hacking" but emphasized that the voting approach requires genuinely different models from different people. A single student's models share too much representation for independent votes.
 
+### 7. Normalization helps less than architecture on this data
+
+| Mode | Dev EER | Test1 EER | Score Mean | Score Std |
+|---|---|---|---|---|
+| Raw (submitted) | 0.00% | 0.00% | 0.4072 | 0.4568 |
+| CMN | 0.20% | 0.41% | 0.2755 | 0.3692 |
+| CVMN | 0.10% | 0.00% | 0.4489 | 0.4605 |
+
+CMN slightly hurt performance. CVMN maintained near-perfect in-domain accuracy while shifting the score distribution. Neither is a game-changer on the same CNN2D architecture. The bigger lever for OOD is architectural (StatsPool, wider channels, EMA) as confirmed by reproducing dlqueen's model.
+
+### 8. Right ideas, wrong combinations
+
+Our archived `StatsPoolMLP` used mean+std pooling (the key ingredient in dlqueen's model) but applied it in an MLP that destroyed temporal locality. Our CNN2D had the right spatial structure but used mean-only pooling. The winning recipe was the combination we never tried: **1D conv + StatsPool + wide channels + EMA + class weighting.**
+
 ## Open Questions
 
 1. Would scoring on **delta/delta-delta bands only** (features 60-180) be more discriminative? Those capture temporal *changes* where real speech should differ most from smooth fakes.
 2. Would a **VAE** with KL regularization force the latent space to be more structured, preventing the model from learning a "reconstruct anything" representation?
 3. The professor's semi-supervised voting approach: with our supervised model's scores + CAE's anomaly scores + classmate's k-means clusters, could we triangulate pseudo-labels on the final test set?
 4. Is the CAE's inverted polarity actually more robust on truly unseen attacks? We can't answer this without harder test labels.
+5. Would our CNN2D with StatsPool (replace `mean(dim=2)` with mean+std concat) close the gap to dlqueen without changing anything else?
 
 ## Archived Models (from `src/archive/models.py`)
 
@@ -168,3 +183,9 @@ Overriding our scores with group consensus could make things **worse** by amplif
 | `src/evaluation_cae.py` | MSE-based anomaly scoring + EER |
 | `src/hybrid_ensemble.py` | Supervised + CAE alpha sweep |
 | `src/predict_hybrid.py` | Final test prediction + distribution comparison |
+| `src/compare_normalization.py` | CMN/CVMN comparison on CNN2D |
+| `src/compare_kernels.py` | Kernel size + normalization experiments on CNN1D |
+| `src/dlqueen_model.py` | Reproduction of top-ranked classmate's model |
+| `results/prediction_dlqueen_test1.pkl` | dlqueen repro predictions on test1 |
+| `results/prediction_dlqueen_test2.pkl` | dlqueen repro predictions on test2 (OOD) |
+| `results/prediction_ours_test2.pkl` | Our CNN2D predictions on test2 (OOD) |
